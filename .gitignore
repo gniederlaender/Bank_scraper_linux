@@ -24,6 +24,9 @@ wheels/
 .installed.cfg
 *.egg
 
+# venv
+venv/
+
 # Logs
 *.log
 scraper.log
@@ -35,6 +38,7 @@ scraper.log
 # Generated files
 bank_comparison.html
 austrian_banks_data.xlsx
+success.png
 
 # IDE specific files
 .idea/
