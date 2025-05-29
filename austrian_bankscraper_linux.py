@@ -102,10 +102,10 @@ class AustrianBankScraper:
         
         # Switch to enable/disable scraping for each bank
         self.enable_scraping = {
-            'raiffeisen': True,
-            'bawag': True,
-            'bank99': True,
-            'erste': True
+            'raiffeisen': False,
+            'bawag': False,
+            'bank99': False,
+            'erste': False
         }
         
         self.ua = UserAgent()
@@ -412,15 +412,21 @@ class AustrianBankScraper:
                         text-align: center;
                         margin-bottom: 30px;
                     }}
+                    .table-responsive {{
+                        width: 100%;
+                        overflow-x: auto;
+                    }}
                     table {{
                         width: 100%;
                         border-collapse: collapse;
                         margin-bottom: 20px;
+                        min-width: 600px;
                     }}
                     th, td {{
                         padding: 12px;
                         text-align: left;
                         border-bottom: 1px solid #ddd;
+                        white-space: nowrap;
                     }}
                     th {{
                         background-color: #f8f9fa;
@@ -446,45 +452,70 @@ class AustrianBankScraper:
                         font-weight: bold;
                         background-color: #f8f9fa;
                     }}
+                    @media (max-width: 700px) {{
+                        body {{
+                            margin: 0;
+                            padding: 0;
+                        }}
+                        .container {{
+                            margin: 0;
+                            padding: 5px;
+                            border-radius: 0;
+                            box-shadow: none;
+                        }}
+                        table {{
+                            font-size: 12px;
+                            min-width: 400px;
+                        }}
+                        th, td {{
+                            padding: 6px;
+                        }}
+                        h1 {{
+                            font-size: 1.2em;
+                            margin-bottom: 10px;
+                        }}
+                    }}
                 </style>
             </head>
             <body>
                 <div class="container">
                     <h1>Austrian Banks Interest Rate Comparison</h1>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Parameter</th>
-                                {''.join(f'<th class="bank-name">{row["bank_name"].capitalize()}</th>' for row in rows_dict)}
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td class="parameter-name">Sollzinssatz</td>
-                                {''.join(f'<td class="value">{row["rate"]}</td>' for row in rows_dict)}
-                            </tr>
-                            <tr>
-                                <td class="parameter-name">Effektiver Jahreszins</td>
-                                {''.join(f'<td class="value">{row["effektiver_jahreszins"]}</td>' for row in rows_dict)}
-                            </tr>
-                            <tr>
-                                <td class="parameter-name">Nettokreditbetrag</td>
-                                {''.join(f'<td class="value">{row["nettokreditbetrag"]}</td>' for row in rows_dict)}
-                            </tr>
-                            <tr>
-                                <td class="parameter-name">Vertragslaufzeit</td>
-                                {''.join(f'<td class="value">{row["vertragslaufzeit"]}</td>' for row in rows_dict)}
-                            </tr>
-                            <tr>
-                                <td class="parameter-name">Gesamtbetrag</td>
-                                {''.join(f'<td class="value">{row["gesamtbetrag"]}</td>' for row in rows_dict)}
-                            </tr>
-                            <tr>
-                                <td class="parameter-name">Monatliche Rate</td>
-                                {''.join(f'<td class="value">{row["monatliche_rate"]}</td>' for row in rows_dict)}
-                            </tr>
-                        </tbody>
-                    </table>
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Parameter</th>
+                                    {''.join(f'<th class="bank-name">{row["bank_name"].capitalize()}</th>' for row in rows_dict)}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td class="parameter-name">Sollzinssatz</td>
+                                    {''.join(f'<td class="value">{row["rate"]}</td>' for row in rows_dict)}
+                                </tr>
+                                <tr>
+                                    <td class="parameter-name">Effektiver Jahreszins</td>
+                                    {''.join(f'<td class="value">{row["effektiver_jahreszins"]}</td>' for row in rows_dict)}
+                                </tr>
+                                <tr>
+                                    <td class="parameter-name">Nettokreditbetrag</td>
+                                    {''.join(f'<td class="value">{row["nettokreditbetrag"]}</td>' for row in rows_dict)}
+                                </tr>
+                                <tr>
+                                    <td class="parameter-name">Vertragslaufzeit</td>
+                                    {''.join(f'<td class="value">{row["vertragslaufzeit"]}</td>' for row in rows_dict)}
+                                </tr>
+                                <tr>
+                                    <td class="parameter-name">Gesamtbetrag</td>
+                                    {''.join(f'<td class="value">{row["gesamtbetrag"]}</td>' for row in rows_dict)}
+                                </tr>
+                                <tr>
+                                    <td class="parameter-name">Monatliche Rate</td>
+                                    {''.join(f'<td class="value">{row["monatliche_rate"]}</td>' for row in rows_dict)}
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                     <div class="timestamp">
                         Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
                     </div>
