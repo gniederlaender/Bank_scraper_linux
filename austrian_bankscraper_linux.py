@@ -85,12 +85,12 @@ class AustrianBankScraper:
                 'monatliche_rate': 'Monatliche Rate'
             },
             'bank99': {
-                'sollzinssatz': r'Sollzinssatz\s*([\d,]+)\s*%\s*p\.a\.\s*fix',
-                'effektiver_jahreszins': r'effektiver Jahreszins\s*([\d,]+)\s*%\s*p\.a\.',
-                'nettokreditbetrag': r'Kreditbetrag von €\s*(\d{1,3}(?:\.\d{3})*)',
-                'vertragslaufzeit': r'Laufzeit von\s*([\d]+)\s*Monate',
-                'gesamtbetrag': r'Gesamtbetrag von €\s*(\d{1,3}(?:\.\d{3})*)',
-                'monatliche_rate': r'€\s*([\d,.]+)\s*pro Monat'
+                'sollzinssatz': 'nominalzinssatz',  # API field name
+                'effektiver_jahreszins': 'effektivzinssatz',  # API field name
+                'nettokreditbetrag': 'betrag',  # API field name
+                'vertragslaufzeit': 'laufzeit',  # API field name
+                'gesamtbetrag': 'gesamtbelastung',  # API field name
+                'monatliche_rate': 'rate'  # API field name
             },
             'erste': {
                 'sollzinssatz': 'interestRate',
@@ -386,48 +386,82 @@ class AustrianBankScraper:
             elif bank_name == 'bank99':
                 # Wait for the page to load
                 time.sleep(3)
-                # Default values
+
+                # Scrape min/max amount and duration from the page
                 min_betrag = max_betrag = min_laufzeit = max_laufzeit = None
                 try:
                     li_elements = self.driver.find_elements(By.CSS_SELECTOR, 'ul#acn-list > li')
-                    for li in li_elements:
+                    for i, li in enumerate(li_elements):
                         try:
                             left = li.find_element(By.CSS_SELECTOR, '.left')
                             right = li.find_element(By.CSS_SELECTOR, '.right')
-                            header = left.find_element(By.TAG_NAME, 'h2').text.strip().lower()
+                            
+                            # Find the label in the headline div's <p>
+                            headline_divs = left.find_elements(By.CSS_SELECTOR, 'div.headline')
+                            label = None
+                            for hd in headline_divs:
+                                ps = hd.find_elements(By.TAG_NAME, 'p')
+                                if ps:
+                                    label = ps[0].text.strip().lower()
+                                    break
+                            if not label:
+                                # fallback: try to find any <p> in left
+                                ps = left.find_elements(By.TAG_NAME, 'p')
+                                if ps:
+                                    label = ps[0].text.strip().lower()
+                            
                             right_text = right.text.strip()
-                            if 'individuelle kreditsumme' in header:
-                                match = re.search(r'€\s*([\d\.]+)\s*-\s*€?\s*([\d\.]+)', right_text)
-                                if match:
-                                    min_betrag = match.group(1).replace('.', '')
-                                    max_betrag = match.group(2).replace('.', '')
-                            elif 'flexible laufzeit' in header:
-                                match = re.search(r'(\d+)\s*-\s*(\d+)', right_text)
-                                if match:
-                                    min_laufzeit = match.group(1)
-                                    max_laufzeit = match.group(2)
+                            
+                            if label:
+                                if 'kreditsumme' in label:
+                                    match = re.search(r'€\s*([\d\.]+)\s*-\s*€?\s*([\d\.]+)', right_text)
+                                    if match:
+                                        min_betrag = match.group(1).replace('.', '')
+                                        max_betrag = match.group(2).replace('.', '')
+                                        logger.info(f"Bank99 min_betrag: {min_betrag}, max_betrag: {max_betrag}")
+                                elif 'laufzeit' in label:
+                                    match = re.search(r'(\d+)\s*-\s*(\d+)', right_text)
+                                    if match:
+                                        min_laufzeit = match.group(1)
+                                        max_laufzeit = match.group(2)
+                                        logger.info(f"Bank99 min_laufzeit: {min_laufzeit}, max_laufzeit: {max_laufzeit}")
                         except Exception as e:
-                            continue
+                            logger.warning(f"Error parsing li element {i} for Bank99 min/max: {e}")
                 except Exception as e:
                     logger.warning(f"Could not parse min/max amount or duration for Bank99: {e}")
-                # Existing logic for other fields
-                element = self.wait.until(EC.presence_of_element_located((
-                    By.CSS_SELECTOR, 
-                    "h2[id*='reprasentatives-beispiel'] + div.copy p"
-                )))
-                text = element.text
-                logger.info(f"Extracted text: {text}")
-                mapping = self.field_mapping[bank_name]
-                sollzinssatz = re.search(mapping['sollzinssatz'], text).group(1) if re.search(mapping['sollzinssatz'], text) else None
-                effektiver_jahreszins = re.search(mapping['effektiver_jahreszins'], text).group(1) if re.search(mapping['effektiver_jahreszins'], text) else None
-                nettokreditbetrag = re.search(mapping['nettokreditbetrag'], text).group(1) if re.search(mapping['nettokreditbetrag'], text) else None
-                vertragslaufzeit = re.search(mapping['vertragslaufzeit'], text).group(1) if re.search(mapping['vertragslaufzeit'], text) else None
-                gesamtbetrag = re.search(mapping['gesamtbetrag'], text).group(1) if re.search(mapping['gesamtbetrag'], text) else None
-                monatliche_rate = re.search(mapping['monatliche_rate'], text).group(1) if re.search(mapping['monatliche_rate'], text) else None
+                
+                # Make API call to get the calculation data
+                try:
+                    api_url = "https://pwa.bank99.at/public-web-api/kreditrechner?produkt=ratenkredit&betrag=10000&laufzeit=60"
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                    }
+                    response = requests.get(api_url, headers=headers, timeout=10)
+                    response.raise_for_status()
+                    
+                    # Parse XML response
+                    import xml.etree.ElementTree as ET
+                    root = ET.fromstring(response.text)
+                    
+                    # Extract the required fields directly from the root (which is berechnung)
+                    nettokreditbetrag = root.find('betrag').text if root.find('betrag') is not None else None
+                    monatliche_rate = root.find('rate').text if root.find('rate') is not None else None
+                    gesamtbetrag = root.find('gesamtbelastung').text if root.find('gesamtbelastung') is not None else None
+                    sollzinssatz = root.find('nominalzinssatz').text if root.find('nominalzinssatz') is not None else None
+                    effektiver_jahreszins = root.find('effektivzinssatz').text if root.find('effektivzinssatz') is not None else None
+                    vertragslaufzeit = root.find('laufzeit').text if root.find('laufzeit') is not None else None
+                    
+                    logger.info(f"Bank99 API response extracted - betrag: {nettokreditbetrag}, rate: {monatliche_rate}, gesamtbelastung: {gesamtbetrag}, nominalzinssatz: {sollzinssatz}, effektivzinssatz: {effektiver_jahreszins}, laufzeit: {vertragslaufzeit}")
+                        
+                except Exception as e:
+                    logger.error(f"Error making API call for Bank99: {str(e)}")
+                    nettokreditbetrag = monatliche_rate = gesamtbetrag = sollzinssatz = effektiver_jahreszins = vertragslaufzeit = None
+                
                 self.store_interest_rate(
-                    bank_name, 'Representative Example', sollzinssatz, 'EUR', url, nettokreditbetrag, gesamtbetrag, vertragslaufzeit, effektiver_jahreszins, monatliche_rate, text,
+                    bank_name, 'Representative Example', sollzinssatz, 'EUR', url, nettokreditbetrag, gesamtbetrag, vertragslaufzeit, effektiver_jahreszins, monatliche_rate, f"API Response: {response.text if 'response' in locals() else 'No response'}",
                     min_betrag, max_betrag, min_laufzeit, max_laufzeit
                 )
+
             
             elif bank_name == 'erste':
                 # Fetch JSON data directly from the API
