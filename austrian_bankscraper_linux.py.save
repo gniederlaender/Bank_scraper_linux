@@ -479,7 +479,7 @@ class AustrianBankScraper:
             
             elif bank_name == 'erste':
 
-                api_url = self.banks[bank_name]['interest_rates_url']
+
                 # Fetch min/max values with GET request
                 min_betrag = max_betrag = min_laufzeit = max_laufzeit = None
                 try:
