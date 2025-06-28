@@ -27,6 +27,9 @@ wheels/
 # venv
 venv/
 
+# Pictures
+*.png
+
 # Logs
 *.log
 scraper.log

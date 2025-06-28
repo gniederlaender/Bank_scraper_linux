@@ -6,8 +6,6 @@ from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.keys import Keys
 import pandas as pd
 import sqlite3
 import json
@@ -269,12 +267,7 @@ class AustrianBankScraper:
                         bank_name, 'Representative Example', sollzinssatz, 'EUR', url, nettokreditbetrag, gesamtbetrag, vertragslaufzeit, effektiver_jahreszins, monatliche_rate, text,
                         min_betrag, max_betrag, min_laufzeit, max_laufzeit
                     )
-
-                    # Take a screenshot for debugging to verify the input value
-                    screenshot_name = f"raiffeisen_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                    self.driver.save_screenshot(screenshot_name)
-                    logger.info(f"Debug screenshot saved as: {screenshot_name}")
-
+                
                 except Exception as e:
                     logger.error(f"Error processing Raiffeisen data: {str(e)}")
                     # Take a screenshot for debugging
@@ -282,57 +275,6 @@ class AustrianBankScraper:
                     raise
             
             elif bank_name == 'bawag':
-                # Set Kreditbetrag to 10000 before scraping
-                try:
-                    # Wait for element to be clickable
-                    kreditbetrag_input = self.wait.until(
-                        EC.element_to_be_clickable((By.ID, 'Kreditbetrag'))
-                    )
-                    
-                    # Scroll to element if needed
-                    self.driver.execute_script("arguments[0].scrollIntoView(true);", kreditbetrag_input)
-                    time.sleep(0.5)
-                    
-                    # Clear field thoroughly
-                    kreditbetrag_input.click()
-                    kreditbetrag_input.send_keys(Keys.CONTROL + "a")
-                    kreditbetrag_input.send_keys(Keys.DELETE)
-                    time.sleep(0.5)
-                    
-                    # Enter value with ActionChains
-                    actions = ActionChains(self.driver)
-                    actions.send_keys('10000').perform()
-                    
-                    # Trigger events
-                    kreditbetrag_input.send_keys(Keys.TAB)
-                    time.sleep(2)
-                    
-                    # Verify the value was set
-                    current_value = kreditbetrag_input.get_attribute('value')
-                    logger.info(f"Current Kreditbetrag input value: {current_value}")
-                    
-                    if current_value != '10000':
-                        logger.warning(f"Expected '10000' but got '{current_value}'")
-                        # Try JavaScript method as fallback
-                        self.driver.execute_script("arguments[0].value = '10000';", kreditbetrag_input)
-                        self.driver.execute_script("arguments[0].dispatchEvent(new Event('change'));", kreditbetrag_input)
-                        time.sleep(1)
-                        current_value = kreditbetrag_input.get_attribute('value')
-                        logger.info(f"After JavaScript method: {current_value}")
-                    
-                    # Wait 5 seconds for the page to update with the new value
-                    time.sleep(5)
-                    
-                    # Take a screenshot for debugging to verify the input value
-                    screenshot_name = f"bawag_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                    self.driver.save_screenshot(screenshot_name)
-                    logger.info(f"Debug screenshot saved as: {screenshot_name}")
-                    
-                    logger.info("Successfully set Kreditbetrag to 10000 for BAWAG")
-                    
-                except Exception as e:
-                    logger.warning(f"Could not set Kreditbetrag to 10000 for BAWAG: {e}")
-                
                 # Extract from calculation-example table and min-monthly div
                 sollzinssatz = effektiver_jahreszins = nettokreditbetrag = vertragslaufzeit = gesamtbetrag = monatliche_rate = None
                 try:
