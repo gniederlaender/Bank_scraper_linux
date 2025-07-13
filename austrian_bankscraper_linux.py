@@ -24,6 +24,9 @@ import sys
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
+import glob
 
 # Load environment variables
 load_dotenv()
@@ -104,9 +107,9 @@ class AustrianBankScraper:
         
         # Switch to enable/disable scraping for each bank
         self.enable_scraping = {
-            'raiffeisen': False,
-            'bawag': False,
-            'bank99': False,
+            'raiffeisen': True,
+            'bawag': True,
+            'bank99': True,
             'erste': True
         }
         
@@ -780,7 +783,7 @@ class AustrianBankScraper:
             conn.close()
 
     def send_email(self, html_content):
-        """Send email with the bank comparison HTML content"""
+        """Send email with the bank comparison HTML content and screenshot attachments"""
         try:
             # Get email configuration from environment variables
             email_host = os.getenv('EMAIL_HOST')
@@ -802,6 +805,43 @@ class AustrianBankScraper:
             # Attach HTML content
             html_part = MIMEText(html_content, 'html')
             msg.attach(html_part)
+
+            # Add attachments from screenshots folder
+            screenshots_dir = './screenshots'
+            if os.path.exists(screenshots_dir):
+                # Get all files from screenshots directory
+                screenshot_files = glob.glob(os.path.join(screenshots_dir, '*'))
+                
+                for file_path in screenshot_files:
+                    if os.path.isfile(file_path):
+                        try:
+                            # Get filename for attachment name
+                            filename = os.path.basename(file_path)
+                            
+                            # Open the file
+                            with open(file_path, 'rb') as attachment:
+                                # Create MIME base object
+                                part = MIMEBase('application', 'octet-stream')
+                                part.set_payload(attachment.read())
+                            
+                            # Encode the attachment
+                            encoders.encode_base64(part)
+                            
+                            # Add header
+                            part.add_header(
+                                'Content-Disposition',
+                                f'attachment; filename= {filename}'
+                            )
+                            
+                            # Attach to message
+                            msg.attach(part)
+                            
+                            logger.info(f"Attached screenshot: {filename}")
+                            
+                        except Exception as e:
+                            logger.error(f"Error attaching {file_path}: {str(e)}")
+            else:
+                logger.warning("Screenshots directory not found")
 
             # Send email
             with smtplib.SMTP(email_host, email_port) as server:
