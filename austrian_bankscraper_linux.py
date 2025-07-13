@@ -620,7 +620,7 @@ class AustrianBankScraper:
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Austrian Banks Interest Rate Comparison</title>
+                <title>Konsumkredit Konditionenvergleich Österreich</title>
                 <style>
                     body {{
                         font-family: Arial, sans-serif;
@@ -707,7 +707,7 @@ class AustrianBankScraper:
             </head>
             <body>
                 <div class="container">
-                    <h1>Austrian Banks Interest Rate Comparison</h1>
+                    <h1>Konsumkredit Konditionenvergleich Österreich</h1>
                     <div class="table-responsive">
                         <table>
                             <thead>
