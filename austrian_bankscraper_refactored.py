@@ -139,7 +139,7 @@ class WebDriverManager:
 class DatabaseManager:
     """Handles all database operations"""
     
-    def __init__(self, db_path: str = 'austrian_banks.db'):
+    def __init__(self, db_path: str = 'austrian_banks_housing_loan.db'):
         self.db_path = db_path
         self.init_database()
     
@@ -224,7 +224,7 @@ class DatabaseManager:
         conn.close()
         return result
     
-    def export_to_excel(self, filename: str = 'austrian_banks_data.xlsx'):
+    def export_to_excel(self, filename: str = 'austrian_banks_data_housing_loan.xlsx'):
         """Export all data to Excel file"""
         try:
             conn = sqlite3.connect(self.db_path)
@@ -731,7 +731,7 @@ class ReportGenerator:
     def __init__(self, db_manager: DatabaseManager):
         self.db_manager = db_manager
     
-    def generate_html_report(self, filename: str = 'bank_comparison.html') -> str:
+    def generate_html_report(self, filename: str = 'bank_comparison_housing_loan.html') -> str:
         """Generate HTML comparison report"""
         try:
             data = self.db_manager.get_latest_data()
