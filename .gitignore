@@ -40,7 +40,9 @@ scraper.log
 
 # Generated files
 bank_comparison.html
+bank_comparison_housing_loan.html
 austrian_banks_data.xlsx
+austrian_banks_data_housing_loan.xlsx
 success.png
 
 # IDE specific files
