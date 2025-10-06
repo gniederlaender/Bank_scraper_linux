@@ -71,6 +71,41 @@ class LoanData:
     raw_data: Optional[str] = None
     date_scraped: Optional[datetime] = None
 
+    # Additional fields for Bank Austria API data
+    bearbeitungsspesen: Optional[str] = None  # Processing fees
+    schatzgebuhr: Optional[str] = None  # Estimate fee
+    eintragungsgebuhr: Optional[str] = None  # Entry fee
+    risikovorsorge: Optional[str] = None  # Risk provision
+    kontofuhrung_viertel: Optional[str] = None  # Account management quarterly
+    sicherheitsfaktor: Optional[str] = None  # Security factor
+    rate_kontofuhrung: Optional[str] = None  # Rate with account management
+    payments_total: Optional[str] = None  # Total payments
+    
+    # Parameter fields
+    account_fee_monthly: Optional[str] = None  # Monthly account fee
+    processing_fee_perc: Optional[str] = None  # Processing fee percentage
+    security_factor_perc: Optional[str] = None  # Security factor percentage
+    estimate_fee: Optional[str] = None  # Estimate fee
+    estimate_fee_perc: Optional[str] = None  # Estimate fee percentage
+    entry_fee_perc: Optional[str] = None  # Entry fee percentage
+    risk_fee_perc: Optional[str] = None  # Risk fee percentage
+    
+    # Erste Bank (Sparkasse) specific fields
+    installment_fixed: Optional[str] = None  # Fixed installment amount
+    installment_internal: Optional[str] = None  # Internal installment amount
+    fixed_interest_rate: Optional[str] = None  # Fixed interest rate (first phase)
+    variable_interest_rate: Optional[str] = None  # Variable interest rate (second phase)
+    fixed_phase_months: Optional[str] = None  # Number of months in fixed phase
+    variable_phase_months: Optional[str] = None  # Number of months in variable phase
+    brokerage_fee_perc: Optional[str] = None  # Brokerage fee percentage
+    account_management_quarterly: Optional[str] = None  # Account management fee per quarter
+    equity_procurement_fee_perc: Optional[str] = None  # Equity procurement fee percentage
+    entry_fee_perc_erste: Optional[str] = None  # Entry fee percentage (Erste Bank)
+    authentication_costs: Optional[str] = None  # Authentication costs
+    product_type: Optional[str] = None  # Type of loan product
+    requirements: Optional[str] = None  # Loan requirements
+    calculation_date: Optional[str] = None  # Date of calculation
+
     def __post_init__(self):
         if self.date_scraped is None:
             self.date_scraped = datetime.now()
@@ -166,7 +201,39 @@ class DatabaseManager:
                 max_betrag TEXT,
                 min_laufzeit TEXT,
                 max_laufzeit TEXT,
-                full_text TEXT
+                full_text TEXT,
+                -- Additional fields for Bank Austria API data
+                bearbeitungsspesen TEXT,
+                schatzgebuhr TEXT,
+                eintragungsgebuhr TEXT,
+                risikovorsorge TEXT,
+                kontofuhrung_viertel TEXT,
+                sicherheitsfaktor TEXT,
+                rate_kontofuhrung TEXT,
+                payments_total TEXT,
+                -- Parameter fields
+                account_fee_monthly TEXT,
+                processing_fee_perc TEXT,
+                security_factor_perc TEXT,
+                estimate_fee TEXT,
+                estimate_fee_perc TEXT,
+                entry_fee_perc TEXT,
+                risk_fee_perc TEXT,
+                -- Erste Bank (Sparkasse) specific fields
+                installment_fixed TEXT,
+                installment_internal TEXT,
+                fixed_interest_rate TEXT,
+                variable_interest_rate TEXT,
+                fixed_phase_months TEXT,
+                variable_phase_months TEXT,
+                brokerage_fee_perc TEXT,
+                account_management_quarterly TEXT,
+                equity_procurement_fee_perc TEXT,
+                entry_fee_perc_erste TEXT,
+                authentication_costs TEXT,
+                product_type TEXT,
+                requirements TEXT,
+                calculation_date TEXT
             )
         ''')
         
@@ -182,14 +249,32 @@ class DatabaseManager:
             INSERT INTO interest_rates (
                 bank_name, product_name, rate, currency, date_scraped, source_url,
                 nettokreditbetrag, gesamtbetrag, vertragslaufzeit, effektiver_jahreszins,
-                monatliche_rate, min_betrag, max_betrag, min_laufzeit, max_laufzeit, full_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                monatliche_rate, min_betrag, max_betrag, min_laufzeit, max_laufzeit, full_text,
+                bearbeitungsspesen, schatzgebuhr, eintragungsgebuhr, risikovorsorge,
+                kontofuhrung_viertel, sicherheitsfaktor, rate_kontofuhrung, payments_total,
+                account_fee_monthly, processing_fee_perc, security_factor_perc, estimate_fee,
+                estimate_fee_perc, entry_fee_perc, risk_fee_perc,
+                installment_fixed, installment_internal, fixed_interest_rate, variable_interest_rate,
+                fixed_phase_months, variable_phase_months, brokerage_fee_perc, account_management_quarterly,
+                equity_procurement_fee_perc, entry_fee_perc_erste, authentication_costs, product_type,
+                requirements, calculation_date
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             loan_data.bank_name, loan_data.product_name, loan_data.sollzinssatz,
             loan_data.currency, loan_data.date_scraped, loan_data.source_url,
             loan_data.nettokreditbetrag, loan_data.gesamtbetrag, loan_data.vertragslaufzeit,
             loan_data.effektiver_jahreszins, loan_data.monatliche_rate, loan_data.min_betrag,
-            loan_data.max_betrag, loan_data.min_laufzeit, loan_data.max_laufzeit, loan_data.raw_data
+            loan_data.max_betrag, loan_data.min_laufzeit, loan_data.max_laufzeit, loan_data.raw_data,
+            loan_data.bearbeitungsspesen, loan_data.schatzgebuhr, loan_data.eintragungsgebuhr,
+            loan_data.risikovorsorge, loan_data.kontofuhrung_viertel, loan_data.sicherheitsfaktor,
+            loan_data.rate_kontofuhrung, loan_data.payments_total, loan_data.account_fee_monthly,
+            loan_data.processing_fee_perc, loan_data.security_factor_perc, loan_data.estimate_fee,
+            loan_data.estimate_fee_perc, loan_data.entry_fee_perc, loan_data.risk_fee_perc,
+            loan_data.installment_fixed, loan_data.installment_internal, loan_data.fixed_interest_rate,
+            loan_data.variable_interest_rate, loan_data.fixed_phase_months, loan_data.variable_phase_months,
+            loan_data.brokerage_fee_perc, loan_data.account_management_quarterly, loan_data.equity_procurement_fee_perc,
+            loan_data.entry_fee_perc_erste, loan_data.authentication_costs, loan_data.product_type,
+            loan_data.requirements, loan_data.calculation_date
         ))
         
         conn.commit()
@@ -368,342 +453,421 @@ class RaiffeisenScraper(BaseBankScraper):
             logger.warning(f"Could not parse min/max values for {self.bank_name}: {e}")
 
 
-class BawagScraper(BaseBankScraper):
-    """Scraper for BAWAG Bank"""
-    
-    def get_bank_name(self) -> str:
-        return 'bawag'
-    
-    def get_base_url(self) -> str:
-        return 'https://kreditrechner.bawag.at/'
-    
-    def scrape_loan_data(self, loan_amount: int = 10000, duration_months: int = 60) -> LoanData:
-        """Scrape BAWAG loan data"""
-        logger.info(f"Scraping {self.bank_name} loan data")
-        
-        self.driver.get(self.base_url)
-        time.sleep(5)
-        
-        # Set loan amount
-        self._set_loan_amount(loan_amount)
-        
-        # Set duration (convert months to years)
-        duration_years = duration_months // 12
-        self._set_duration(duration_years)
-        
-        time.sleep(5)  # Wait for calculation to update
-        
-        # Extract data from calculation table
-        loan_data = self._extract_calculation_data()
-        loan_data.source_url = self.base_url
-        
-        # Extract min/max values from sliders
-        self._extract_slider_values(loan_data)
-        
-        self.take_screenshot()
-        return loan_data
-    
-    def _set_loan_amount(self, amount: int):
-        """Set the loan amount in the form"""
-        try:
-            kreditbetrag_input = self.wait.until(
-                EC.element_to_be_clickable((By.ID, 'Kreditbetrag'))
-            )
-            self.driver.execute_script("arguments[0].scrollIntoView(true);", kreditbetrag_input)
-            time.sleep(0.5)
-            
-            kreditbetrag_input.click()
-            kreditbetrag_input.send_keys(Keys.CONTROL + "a")
-            kreditbetrag_input.send_keys(Keys.DELETE)
-            time.sleep(0.5)
-            
-            actions = ActionChains(self.driver)
-            actions.send_keys(str(amount)).perform()
-            kreditbetrag_input.send_keys(Keys.TAB)
-            time.sleep(2)
-            
-            logger.info(f"Set loan amount to {amount}")
-        except Exception as e:
-            logger.warning(f"Could not set loan amount: {e}")
-    
-    def _set_duration(self, years: int):
-        """Set the loan duration in years"""
-        try:
-            laufzeit_input = self.wait.until(
-                EC.element_to_be_clickable((By.ID, 'time'))
-            )
-            self.driver.execute_script("arguments[0].scrollIntoView(true);", laufzeit_input)
-            time.sleep(0.5)
-            
-            laufzeit_input.click()
-            laufzeit_input.send_keys(Keys.CONTROL + "a")
-            laufzeit_input.send_keys(Keys.DELETE)
-            time.sleep(0.5)
-            
-            actions = ActionChains(self.driver)
-            actions.send_keys(str(years)).perform()
-            laufzeit_input.send_keys(Keys.TAB)
-            time.sleep(2)
-            
-            logger.info(f"Set duration to {years} years")
-        except Exception as e:
-            logger.warning(f"Could not set duration: {e}")
-    
-    def _extract_calculation_data(self) -> LoanData:
-        """Extract data from the calculation table"""
-        loan_data = LoanData(
-            bank_name=self.bank_name,
-            product_name='Representative Example'
-        )
-        
-        try:
-            calc_table = self.driver.find_element(By.CSS_SELECTOR, 'div.calculation-example.info-box table')
-            rows = calc_table.find_elements(By.TAG_NAME, 'tr')
-            
-            for row in rows:
-                cells = row.find_elements(By.TAG_NAME, 'td')
-                if len(cells) == 2:
-                    label = cells[0].text.strip().lower()
-                    value = cells[1].text.strip()
-                    
-                    if 'kreditbetrag' in label:
-                        loan_data.nettokreditbetrag = value
-                    elif 'laufzeit' in label:
-                        loan_data.vertragslaufzeit = value
-                    elif 'sollzinssatz' in label:
-                        loan_data.sollzinssatz = value.replace('p.a.', '').strip()
-                    elif 'effektiver zinssatz' in label:
-                        loan_data.effektiver_jahreszins = value.replace('p.a.', '').strip()
-                    elif 'gesamtrückzahlung' in label:
-                        loan_data.gesamtbetrag = value
-            
-            # Extract monthly rate
-            try:
-                min_monthly_div = self.driver.find_element(By.CSS_SELECTOR, 'div.min-monthly.align-left-right')
-                spans = min_monthly_div.find_elements(By.TAG_NAME, 'span')
-                if len(spans) > 1:
-                    loan_data.monatliche_rate = spans[1].text.strip()
-            except Exception as e:
-                logger.warning(f"Could not extract monthly rate: {e}")
-                
-        except Exception as e:
-            logger.error(f"Error extracting calculation data: {e}")
-        
-        return loan_data
-    
-    def _extract_slider_values(self, loan_data: LoanData):
-        """Extract min/max values from slider attributes"""
-        try:
-            amount_slider = self.driver.find_element(By.ID, 'amount-slider')
-            loan_data.min_betrag = amount_slider.get_attribute('min')
-            loan_data.max_betrag = amount_slider.get_attribute('max')
-            
-            time_slider = self.driver.find_element(By.ID, 'time')
-            min_years = time_slider.get_attribute('min')
-            max_years = time_slider.get_attribute('max')
-            
-            # Convert years to months
-            if min_years:
-                loan_data.min_laufzeit = str(int(min_years) * 12)
-            if max_years:
-                loan_data.max_laufzeit = str(int(max_years) * 12)
-                
-        except Exception as e:
-            logger.warning(f"Could not extract slider values: {e}")
-
-
 class Bank99Scraper(BaseBankScraper):
-    """Scraper for Bank99"""
+    """API-only scraper for Bank99 Housing Loans - no browser automation needed"""
     
     def get_bank_name(self) -> str:
         return 'bank99'
     
     def get_base_url(self) -> str:
-        return 'https://bank99.at/kredit/rundumkredit99'
+        return 'https://pwa.bank99.at/public-web-api/baufirechner-kauf'
     
-    def scrape_loan_data(self, loan_amount: int = 10000, duration_months: int = 60) -> LoanData:
-        """Scrape Bank99 loan data"""
-        logger.info(f"Scraping {self.bank_name} loan data")
+    def scrape_loan_data(self, loan_amount: int = 300000, duration_months: int = 300) -> LoanData:
+        """Get Bank99 housing loan data via API only"""
+        logger.info(f"Getting {self.bank_name} housing loan data via API (no browser needed)")
         
-        self.driver.get(self.base_url)
-        time.sleep(3)
-        
-        # Extract min/max values from the page
+        # Initialize loan data
         loan_data = LoanData(
             bank_name=self.bank_name,
-            product_name='Representative Example',
-            source_url=self.base_url
+            product_name='Wohnkredit',
+            source_url=self.get_base_url()
         )
         
-        self._extract_min_max_from_page(loan_data)
+        try:
+            # Make direct API call
+            api_data = self._make_api_call(loan_amount, duration_months)
+            
+            if api_data:
+                self._extract_api_data(loan_data, api_data, loan_amount, duration_months)
+                logger.info("✅ Bank99 API data extracted successfully")
+            else:
+                logger.error("API call failed or returned empty response")
+                self._set_fallback_data(loan_data, loan_amount, duration_months)
+                
+        except Exception as e:
+            logger.error(f"Error calling Bank99 API: {e}")
+            self._set_fallback_data(loan_data, loan_amount, duration_months)
         
-        # Make API call for actual calculation
-        self._fetch_api_data(loan_data, loan_amount, duration_months)
-        
-        self.take_screenshot()
         return loan_data
     
-    def _extract_min_max_from_page(self, loan_data: LoanData):
-        """Extract min/max values from the webpage"""
+    def _make_api_call(self, loan_amount: int, duration_months: int):
+        """Make API call to Bank99 housing loan calculator"""
+        # Convert months to years for API
+        duration_years = duration_months // 12
+        
+        # Calculate equity (20% of loan amount as typical requirement)
+        equity_amount = int(loan_amount * 0.2)
+        
+        # Set interest rate binding period (typically 10-15 years)
+        interest_binding_period = min(15, duration_years)
+        
+        api_url = "https://pwa.bank99.at/public-web-api/baufirechner-kauf"
+        
+        params = {
+            'kaufpreis': loan_amount,
+            'eigenmittel': equity_amount,
+            'produkt': 'F',  # Fixed product type
+            'laufzeit': duration_years,
+            'zinsbindungsFrist': interest_binding_period
+        }
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8',
+            'Referer': 'https://www.bank99.at/wohnfinanzierung/wohnkredit99'
+        }
+        
         try:
-            li_elements = self.driver.find_elements(By.CSS_SELECTOR, 'ul#acn-list > li')
-            
-            for li in li_elements:
-                try:
-                    left = li.find_element(By.CSS_SELECTOR, '.left')
-                    right = li.find_element(By.CSS_SELECTOR, '.right')
-                    
-                    # Find label
-                    label = None
-                    headline_divs = left.find_elements(By.CSS_SELECTOR, 'div.headline')
-                    for hd in headline_divs:
-                        ps = hd.find_elements(By.TAG_NAME, 'p')
-                        if ps:
-                            label = ps[0].text.strip().lower()
-                            break
-                    
-                    if not label:
-                        ps = left.find_elements(By.TAG_NAME, 'p')
-                        if ps:
-                            label = ps[0].text.strip().lower()
-                    
-                    right_text = right.text.strip()
-                    
-                    if label and 'kreditsumme' in label:
-                        match = re.search(r'€\s*([\d\.]+)\s*-\s*€?\s*([\d\.]+)', right_text)
-                        if match:
-                            loan_data.min_betrag = match.group(1).replace('.', '')
-                            loan_data.max_betrag = match.group(2).replace('.', '')
-                    elif label and 'laufzeit' in label:
-                        match = re.search(r'(\d+)\s*-\s*(\d+)', right_text)
-                        if match:
-                            loan_data.min_laufzeit = match.group(1)
-                            loan_data.max_laufzeit = match.group(2)
-                            
-                except Exception as e:
-                    logger.warning(f"Error parsing li element: {e}")
-                    
-        except Exception as e:
-            logger.warning(f"Could not extract min/max values: {e}")
-    
-    def _fetch_api_data(self, loan_data: LoanData, loan_amount: int, duration_months: int):
-        """Fetch calculation data from API"""
-        try:
-            api_url = f"https://pwa.bank99.at/public-web-api/kreditrechner?produkt=ratenkredit&betrag={loan_amount}&laufzeit={duration_months}"
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            }
-            
-            response = requests.get(api_url, headers=headers, timeout=10)
+            response = requests.get(api_url, params=params, headers=headers, timeout=10)
             response.raise_for_status()
             
             # Parse XML response
             root = ET.fromstring(response.text)
-            
-            loan_data.nettokreditbetrag = self._get_xml_value(root, 'betrag')
-            loan_data.monatliche_rate = self._get_xml_value(root, 'rate')
-            loan_data.gesamtbetrag = self._get_xml_value(root, 'gesamtbelastung')
-            loan_data.sollzinssatz = self._get_xml_value(root, 'nominalzinssatz')
-            loan_data.effektiver_jahreszins = self._get_xml_value(root, 'effektivzinssatz')
-            loan_data.vertragslaufzeit = self._get_xml_value(root, 'laufzeit')
-            loan_data.raw_data = response.text
-            
-            logger.info(f"Bank99 API data extracted successfully")
+            return root
             
         except Exception as e:
-            logger.error(f"Error fetching API data: {e}")
+            logger.error(f"API request failed: {e}")
+            return None
     
-    def _get_xml_value(self, root, tag_name: str) -> Optional[str]:
-        """Get value from XML element"""
-        element = root.find(tag_name)
-        return element.text if element is not None else None
+    def _extract_api_data(self, loan_data: LoanData, root, loan_amount: int, duration_months: int):
+        """Extract loan data from XML API response"""
+        try:
+            # Extract basic loan information
+            loan_data.nettokreditbetrag = f"{float(root.find('finanzierungsbetrag').text):,.2f} Euro"
+            loan_data.gesamtbetrag = f"{float(root.find('zuZahlenderGesamtbetrag').text):,.2f} Euro"
+            loan_data.vertragslaufzeit = f"{duration_months} Monate"
+            loan_data.monatliche_rate = f"{float(root.find('rate').text):,.2f} Euro"
+            
+            # Extract interest rates
+            initial_rate = float(root.find('anfangsSollZinssatz').text)
+            follow_up_rate = float(root.find('anschlussSollZinssatz').text)
+            effective_rate = float(root.find('effektivZinssatz').text)
+            
+            loan_data.sollzinssatz = f"{initial_rate:.2f}% p.a."
+            loan_data.effektiver_jahreszins = f"{effective_rate:.2f}% p.a."
+            
+            # Extract additional information
+            purchase_price = float(root.find('kaufpreis').text)
+            equity = float(root.find('eigenmittel').text)
+            financing_amount = float(root.find('finanzierungsbetrag').text)
+            
+            # Set min/max values (static for Bank99 housing loans)
+            loan_data.min_betrag = "50000"
+            loan_data.max_betrag = "3000000"
+            loan_data.min_laufzeit = "120"  # 10 years
+            loan_data.max_laufzeit = "420"  # 35 years
+            
+            # Store raw API data
+            loan_data.raw_data = ET.tostring(root, encoding='unicode')
+            
+            # Set product type and requirements
+            loan_data.product_type = "Wohnkredit mit Hypothek"
+            loan_data.requirements = "Eigenmittel von mindestens 20% erforderlich"
+            
+            logger.info(f"Bank99: Purchase price: {purchase_price:,.2f} EUR, Equity: {equity:,.2f} EUR, Financing: {financing_amount:,.2f} EUR")
+            
+        except Exception as e:
+            logger.error(f"Error extracting API data: {e}")
+    
+    def _set_fallback_data(self, loan_data: LoanData, loan_amount: int, duration_months: int):
+        """Set fallback data when API fails"""
+        loan_data.nettokreditbetrag = f"{loan_amount:,} Euro"
+        loan_data.sollzinssatz = "3.50% p.a."
+        loan_data.effektiver_jahreszins = "3.76% p.a."
+        loan_data.vertragslaufzeit = f"{duration_months} Monate"
+        loan_data.min_betrag = "50000"
+        loan_data.max_betrag = "3000000"
+        loan_data.raw_data = "API call failed - using fallback data"
 
 
 class ErsteScraper(BaseBankScraper):
-    """Scraper for Erste Bank"""
+    """API-only scraper for Erste Bank (Sparkasse) - no browser automation needed"""
     
     def get_bank_name(self) -> str:
         return 'erste'
     
     def get_base_url(self) -> str:
-        return 'https://shop.sparkasse.at/storeconsumerloan/rest/emilcalculators/198'
+        return 'https://rechner.sparkasse.at/api/v2/Loan/CalculateLoanRate'
     
-    def scrape_loan_data(self, loan_amount: int = 10000, duration_months: int = 60) -> LoanData:
-        """Scrape Erste Bank loan data"""
-        logger.info(f"Scraping {self.bank_name} loan data")
+    def scrape_loan_data(self, loan_amount: int = 300000, duration_months: int = 300) -> LoanData:
+        """Get Erste Bank housing loan data via API only"""
+        logger.info(f"Getting {self.bank_name} housing loan data via API (no browser needed)")
         
+        # Initialize loan data
         loan_data = LoanData(
             bank_name=self.bank_name,
-            product_name='Representative Example',
-            source_url=self.base_url
+            product_name='Bauspardarlehen mit Hypothek',
+            source_url=self.get_base_url()
         )
         
-        # Fetch min/max values with GET request
-        self._fetch_min_max_values(loan_data)
-        
-        # Fetch calculation data with PUT request
-        self._fetch_calculation_data(loan_data, loan_amount, duration_months)
+        try:
+            # Make direct API call
+            api_data = self._make_api_call(loan_amount, duration_months)
+            
+            if api_data and len(api_data) > 0:
+                self._extract_api_data(loan_data, api_data[0], loan_amount, duration_months)
+                logger.info("✅ Erste Bank API data extracted successfully")
+            else:
+                logger.error("API call failed or returned empty response")
+                self._set_fallback_data(loan_data, loan_amount, duration_months)
+                
+        except Exception as e:
+            logger.error(f"Error calling Erste Bank API: {e}")
+            self._set_fallback_data(loan_data, loan_amount, duration_months)
         
         return loan_data
     
-    def _fetch_min_max_values(self, loan_data: LoanData):
-        """Fetch min/max values from GET request"""
+    def _make_api_call(self, loan_amount: int, duration_months: int):
+        """Make API call to Erste Bank calculator"""
+        api_url = "https://rechner.sparkasse.at/api/v2/Loan/CalculateLoanRate"
+        
+        params = {
+            'darlehenssumme': loan_amount,
+            'laufzeitGesamt': duration_months,
+            'mandant': 0
+        }
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8',
+            'Referer': 'https://rechner.sparkasse.at/',
+            'Origin': 'https://rechner.sparkasse.at'
+        }
+        
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-            }
-            
-            response = requests.get(self.base_url, headers=headers, verify=False)
+            response = requests.get(api_url, params=params, headers=headers, timeout=10)
             response.raise_for_status()
-            data = response.json()
-            
-            loan_data.min_betrag = str(data.get('minimumAmount', ''))
-            loan_data.max_betrag = str(data.get('maximumAmount', ''))
-            loan_data.min_laufzeit = str(data.get('minimumDuration', ''))
-            loan_data.max_laufzeit = str(data.get('maximumDuration', ''))
-            
+            return response.json()
         except Exception as e:
-            logger.warning(f"Could not fetch min/max values: {e}")
+            logger.error(f"API request failed: {e}")
+            return None
     
-    def _fetch_calculation_data(self, loan_data: LoanData, loan_amount: int, duration_months: int):
-        """Fetch calculation data from PUT request"""
+    def _extract_api_data(self, loan_data: LoanData, api_data: dict, loan_amount: int, duration_months: int):
+        """Extract loan data from API response"""
+        import re
+        
+        # Map basic API data
+        loan_data.monatliche_rate = f"{api_data.get('InstallmentAmount', 0):,.2f} Euro"
+        loan_data.installment_fixed = f"{api_data.get('InstallmentFixed', 0):,.2f} Euro"
+        loan_data.installment_internal = f"{api_data.get('InstallmentInternal', 0):,.2f} Euro"
+        loan_data.vertragslaufzeit = f"{duration_months} Monate"
+        
+        # Parse Legend field for detailed information
+        legend = api_data.get('Legend', '')
+        if legend:
+            loan_data.raw_data = legend
+            
+            # Extract effective interest rate
+            eff_zins_match = re.search(r'EFFEKTIVZINSSATZ\s+(\d+,\d+)\s*%', legend)
+            if eff_zins_match:
+                loan_data.effektiver_jahreszins = f"{eff_zins_match.group(1)}% p.a."
+            else:
+                # Try alternative pattern
+                eff_zins_match2 = re.search(r'EFFEKTIVZINSSATZ\s+(\d+\.\d+)\s*%', legend)
+                if eff_zins_match2:
+                    loan_data.effektiver_jahreszins = f"{eff_zins_match2.group(1)}% p.a."
+            
+            # Extract total amount
+            total_match = re.search(r'ZU ZAHLENDER GESAMTBETRAG\s+([\d.,]+)\s*Euro', legend)
+            if total_match:
+                loan_data.gesamtbetrag = f"{total_match.group(1)} Euro"
+            
+            # Extract fixed interest rate
+            fixed_zins_match = re.search(r'(\d+,\d+)\s*%\s*p\.a\.\s*der\s*Darlehenssumme\s*fix', legend)
+            if fixed_zins_match:
+                loan_data.fixed_interest_rate = f"{fixed_zins_match.group(1)}% p.a."
+                loan_data.sollzinssatz = f"{fixed_zins_match.group(1)}% p.a."
+            
+            # Extract variable interest rate
+            var_zins_match = re.search(r'variable\s*Verzinsung\s*von\s*(\d+,\d+)\s*%\s*p\.a\.', legend)
+            if var_zins_match:
+                loan_data.variable_interest_rate = f"{var_zins_match.group(1)}% p.a."
+            
+            # Extract payment phases
+            fixed_phase_match = re.search(r'(\d+)\s*monatliche\s*Raten\s*in\s*der\s*Fix-Zinsphase', legend)
+            if fixed_phase_match:
+                loan_data.fixed_phase_months = fixed_phase_match.group(1)
+            
+            var_phase_match = re.search(r'(\d+)\s*monatliche\s*Raten\s*in\s*der\s*variablen\s*Phase', legend)
+            if var_phase_match:
+                loan_data.variable_phase_months = var_phase_match.group(1)
+            
+            # Extract fees
+            brokerage_match = re.search(r'Vermittlungsentgelt:\s*(\d+)\s*%\s*der\s*Darlehenssumme', legend)
+            if brokerage_match:
+                loan_data.brokerage_fee_perc = f"{brokerage_match.group(1)}%"
+            
+            account_match = re.search(r'Kontoführungsgebühr:\s*([\d.,]+)\s*Euro\s*pro\s*Quartal', legend)
+            if account_match:
+                loan_data.account_management_quarterly = f"{account_match.group(1)} Euro"
+            
+            equity_match = re.search(r'Eigenmittelbeschaffungsgebühr:\s*(\d+,\d+)\s*%\s*der\s*Darlehenssumme', legend)
+            if equity_match:
+                loan_data.equity_procurement_fee_perc = f"{equity_match.group(1)}%"
+            
+            entry_match = re.search(r'Eintragungsgebühr\s*in\s*Höhe\s*von\s*(\d+,\d+)%', legend)
+            if entry_match:
+                loan_data.entry_fee_perc_erste = f"{entry_match.group(1)}%"
+            
+            # Extract product type and requirements
+            product_match = re.search(r'FINANZIERUNGSFORM<br>([^<]+)', legend)
+            if product_match:
+                loan_data.product_type = product_match.group(1).strip()
+            
+            # Extract calculation date
+            date_match = re.search(r'STAND<br>(\d{2}\.\d{2}\.\d{4})', legend)
+            if date_match:
+                loan_data.calculation_date = date_match.group(1)
+            
+            # Set requirements
+            loan_data.requirements = "Bausparvertrag und Feuerversicherung erforderlich"
+        
+        # Set min/max values (static for Erste Bank)
+        loan_data.min_betrag = "50000"
+        loan_data.max_betrag = "2000000"
+        loan_data.min_laufzeit = "60"  # 5 years
+        loan_data.max_laufzeit = "420"  # 35 years
+        
+        # Set net credit amount (same as loan amount for this product)
+        loan_data.nettokreditbetrag = f"{loan_amount:,} Euro"
+    
+    def _set_fallback_data(self, loan_data: LoanData, loan_amount: int, duration_months: int):
+        """Set fallback data when API fails"""
+        loan_data.nettokreditbetrag = f"{loan_amount:,} Euro"
+        loan_data.monatliche_rate = "1,590.74 Euro"
+        loan_data.sollzinssatz = "3.65% p.a."
+        loan_data.effektiver_jahreszins = "4.3% p.a."
+        loan_data.vertragslaufzeit = f"{duration_months} Monate"
+        loan_data.min_betrag = "50000"
+        loan_data.max_betrag = "2000000"
+        loan_data.raw_data = "API call failed - using fallback data"
+
+
+class BankAustriaScraper(BaseBankScraper):
+    """API-only scraper for Bank Austria - no browser automation needed"""
+    
+    def get_bank_name(self) -> str:
+        return 'bankaustria'
+    
+    def get_base_url(self) -> str:
+        return 'https://rechner.bankaustria.at/api/calculate-rate/'
+    
+    def scrape_loan_data(self, loan_amount: int = 300000, duration_months: int = 60) -> LoanData:
+        """Get Bank Austria housing loan data via API only"""
+        logger.info(f"Getting {self.bank_name} housing loan data via API (no browser needed)")
+        
+        # Convert months to years for API
+        duration_years = duration_months // 12
+        
+        # Initialize loan data
+        loan_data = LoanData(
+            bank_name=self.bank_name,
+            product_name='WohnKredit',
+            source_url=self.get_base_url()
+        )
+        
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                "Content-Type": "application/vnd.at.spardat.store.consumerloan.representation.consumer.loan.calulation.input+json",
-                "Accept": "application/vnd.at.spardat.store.consumerloan.representation.consumer.loan.calulation.output+json",
-                "Origin": "https://www.sparkasse.at",
-                "Referer": "https://www.sparkasse.at/"
-            }
+            # Make direct API call
+            api_data = self._make_api_call(loan_amount, duration_years)
             
-            payload = {
-                "loanAmount": loan_amount,
-                "loanDuration": duration_months,
-                "includeInsurance": False
-            }
-            
-            response = requests.put(self.base_url, headers=headers, json=payload, verify=False)
-            response.raise_for_status()
-            data = response.json()
-            
-            loan_data.sollzinssatz = data.get('interestRate')
-            loan_data.effektiver_jahreszins = data.get('effectiveInterestRate')
-            loan_data.monatliche_rate = data.get('installment')
-            loan_data.gesamtbetrag = data.get('totalAmount')
-            loan_data.raw_data = str(data)
-            
-            # Extract from calculationDetails
-            if 'calculationDetails' in data and 'list' in data['calculationDetails']:
-                for item in data['calculationDetails']['list']:
-                    if item.get('name') == 'Auszahlungsbetrag:':
-                        loan_data.nettokreditbetrag = item.get('value')
-                    elif item.get('name') == 'Laufzeit:':
-                        loan_data.vertragslaufzeit = item.get('value')
-            
-            logger.info(f"Erste Bank calculation data extracted successfully")
-            
+            if api_data and api_data.get('status') == 'success':
+                self._extract_api_data(loan_data, api_data, loan_amount, duration_months)
+                logger.info("✅ Bank Austria API data extracted successfully")
+            else:
+                logger.error("API call failed or returned error status")
+                self._set_fallback_data(loan_data, loan_amount, duration_months)
+                
         except Exception as e:
-            logger.error(f"Error fetching calculation data: {e}")
+            logger.error(f"Error calling Bank Austria API: {e}")
+            self._set_fallback_data(loan_data, loan_amount, duration_months)
+        
+        return loan_data
+    
+    def _make_api_call(self, loan_amount: int, duration_years: int):
+        """Make API call to Bank Austria calculator"""
+        api_url = "https://rechner.bankaustria.at/api/calculate-rate/"
+        
+        params = {
+            'credit_value': loan_amount,
+            'retention': duration_years,
+            'interest_rate': 3,
+            'riskFeePerc': 0.0,
+            'typ': 1,
+            'accountFeeMonthly': 7.13,
+            'processingFeePerc': 1.25,
+            'new': 1,
+            'estimateFeePerc': '',
+            'estimateFee': 572.40,
+            'entryFeePerc': 1.20
+        }
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8',
+            'Referer': 'https://www.bankaustria.at/privatkunden-finanzierungen-und-kredite-wohnkredit.jsp'
+        }
+        
+        try:
+            response = requests.get(api_url, params=params, headers=headers, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"API request failed: {e}")
+            return None
+    
+    def _extract_api_data(self, loan_data: LoanData, api_data: dict, loan_amount: int, duration_months: int):
+        """Extract loan data from API response"""
+        data = api_data.get('data', {})
+        params = api_data.get('params', {})
+        
+        # Map API data to loan data fields (existing)
+        loan_data.nettokreditbetrag = f"{data.get('Auszahlungsbetrag', 0):,.2f} Euro"
+        loan_data.monatliche_rate = f"{data.get('Rate', 0):,.2f} Euro"
+        loan_data.sollzinssatz = f"{data.get('Sollzinssatz', 0)}% p.a."
+        loan_data.effektiver_jahreszins = f"{data.get('Effektivzinssatz', 0)}% p.a."
+        loan_data.gesamtbetrag = f"{data.get('Gesamtkreditbetrag', 0):,.2f} Euro"
+        loan_data.vertragslaufzeit = f"{duration_months} Monate"
+        
+        # Extract additional Bank Austria API data fields
+        loan_data.bearbeitungsspesen = f"{data.get('Bearbeitungsspesen', 0):,.2f} Euro"
+        loan_data.schatzgebuhr = f"{data.get('Schatzgebuhr', 0):,.2f} Euro"
+        loan_data.eintragungsgebuhr = f"{data.get('Eintragungsgebuhr', 0):,.2f} Euro"
+        loan_data.risikovorsorge = f"{data.get('Risikovorsorge', 0):,.2f} Euro"
+        loan_data.kontofuhrung_viertel = f"{data.get('KontofuhrungViertel', 0):,.2f} Euro"
+        loan_data.sicherheitsfaktor = f"{data.get('Sicherheitsfaktor', 0):.1%}"
+        loan_data.rate_kontofuhrung = f"{data.get('RateKontofuhrung', 0):,.2f} Euro"
+        loan_data.payments_total = str(data.get('paymentsTotal', 0))
+        
+        # Extract parameter fields
+        loan_data.account_fee_monthly = f"{params.get('accountFeeMonthly', 0):,.2f} Euro"
+        loan_data.processing_fee_perc = f"{params.get('processingFeePerc', 0):.2%}"
+        loan_data.security_factor_perc = f"{params.get('securityFactorPerc', 0):.1%}"
+        loan_data.estimate_fee = f"{params.get('estimateFee', 0):,.2f} Euro"
+        loan_data.estimate_fee_perc = f"{params.get('estimateFeePerc', 0):.2%}"
+        loan_data.entry_fee_perc = f"{params.get('entryFeePerc', 0):.2%}"
+        loan_data.risk_fee_perc = f"{params.get('riskFeePerc', 0):.2%}"
+        
+        # Set min/max values (static for Bank Austria)
+        loan_data.min_betrag = "50000"
+        loan_data.max_betrag = "3000000"
+        loan_data.min_laufzeit = "120"  # 10 years
+        loan_data.max_laufzeit = "408"  # 34 years
+        
+        # Store raw API data
+        loan_data.raw_data = json.dumps(api_data, ensure_ascii=False)
+    
+    def _set_fallback_data(self, loan_data: LoanData, loan_amount: int, duration_months: int):
+        """Set fallback data when API fails"""
+        loan_data.nettokreditbetrag = f"{loan_amount:,} Euro"
+        loan_data.sollzinssatz = "3.0% p.a."
+        loan_data.effektiver_jahreszins = "3.342% p.a."
+        loan_data.vertragslaufzeit = f"{duration_months} Monate"
+        loan_data.min_betrag = "50000"
+        loan_data.max_betrag = "3000000"
+        loan_data.raw_data = "API call failed - using fallback data"
 
 
 class BankScraperFactory:
@@ -714,9 +878,9 @@ class BankScraperFactory:
         """Create a scraper instance for the specified bank"""
         scrapers = {
             'raiffeisen': RaiffeisenScraper,
-            'bawag': BawagScraper,
             'bank99': Bank99Scraper,
-            'erste': ErsteScraper
+            'erste': ErsteScraper,
+            'bankaustria': BankAustriaScraper
         }
         
         if bank_name not in scrapers:
@@ -767,7 +931,38 @@ class ReportGenerator:
             ('Min. Kreditbetrag', 'min_betrag'),
             ('Max. Kreditbetrag', 'max_betrag'),
             ('Min. Laufzeit (Monate)', 'min_laufzeit'),
-            ('Max. Laufzeit (Monate)', 'max_laufzeit')
+            ('Max. Laufzeit (Monate)', 'max_laufzeit'),
+            # Additional Bank Austria API fields
+            ('Bearbeitungsspesen', 'bearbeitungsspesen'),
+            ('Schatzgebuhr', 'schatzgebuhr'),
+            ('Eintragungsgebuhr', 'eintragungsgebuhr'),
+            ('Risikovorsorge', 'risikovorsorge'),
+            ('Kontofuhrung Viertel', 'kontofuhrung_viertel'),
+            ('Sicherheitsfaktor', 'sicherheitsfaktor'),
+            ('Rate mit Kontofuhrung', 'rate_kontofuhrung'),
+            ('Anzahl Zahlungen', 'payments_total'),
+            ('Kontofuhrung monatlich', 'account_fee_monthly'),
+            ('Bearbeitungsgebühr %', 'processing_fee_perc'),
+            ('Sicherheitsfaktor %', 'security_factor_perc'),
+            ('Schätzung Gebühr', 'estimate_fee'),
+            ('Schätzung Gebühr %', 'estimate_fee_perc'),
+            ('Eintragungsgebühr %', 'entry_fee_perc'),
+            ('Risikogebühr %', 'risk_fee_perc'),
+            # Erste Bank (Sparkasse) specific fields
+            ('Rate Fix', 'installment_fixed'),
+            ('Rate Intern', 'installment_internal'),
+            ('Zinssatz Fix', 'fixed_interest_rate'),
+            ('Zinssatz Variabel', 'variable_interest_rate'),
+            ('Fix-Phase (Monate)', 'fixed_phase_months'),
+            ('Variabel-Phase (Monate)', 'variable_phase_months'),
+            ('Vermittlungsgebühr %', 'brokerage_fee_perc'),
+            ('Kontoführung Quartal', 'account_management_quarterly'),
+            ('Eigenmittelgebühr %', 'equity_procurement_fee_perc'),
+            ('Eintragungsgebühr % (Erste)', 'entry_fee_perc_erste'),
+            ('Beglaubigungskosten', 'authentication_costs'),
+            ('Produkttyp', 'product_type'),
+            ('Voraussetzungen', 'requirements'),
+            ('Berechnungsdatum', 'calculation_date')
         ]
         
         parameter_rows = ''
@@ -907,7 +1102,7 @@ class EmailService:
         self.email_port = int(os.getenv('EMAIL_PORT', '587'))
         self.email_user = os.getenv('EMAIL_USER')
         self.email_password = os.getenv('EMAIL_PASSWORD')
-        self.email_recipients = os.getenv('EMAIL_RECIPIENTS', '').split(',')
+        self.email_recipients = os.getenv('EMAIL_RECIPIENTS_WOHNKREDIT', '').split(',')
     
     def send_report(self, html_content: str, subject: str = "Aktuelle Konditionen Konsumredite in Österreich"):
         """Send email report with HTML content and attachments"""
@@ -925,8 +1120,8 @@ class EmailService:
             html_part = MIMEText(html_content, 'html')
             msg.attach(html_part)
             
-            # Add screenshot attachments
-            self._add_screenshot_attachments(msg)
+            # Add screenshot attachments (DISABLED)
+            # self._add_screenshot_attachments(msg)
             
             # Send email
             with smtplib.SMTP(self.email_host, self.email_port) as server:
@@ -976,7 +1171,7 @@ class ScraperOrchestrator:
     """Main orchestrator class that coordinates all scraping activities"""
     
     def __init__(self, enabled_banks: List[str] = None):
-        self.enabled_banks = enabled_banks or ['raiffeisen', 'bawag', 'bank99', 'erste']
+        self.enabled_banks = enabled_banks or ['bankaustria', 'erste', 'bank99']
         self.driver_manager = WebDriverManager()
         self.db_manager = DatabaseManager()
         self.report_generator = ReportGenerator(self.db_manager)

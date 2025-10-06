@@ -27,6 +27,12 @@ wheels/
 # venv
 venv/
 
+# Test files
+Tests/
+
+#Deep_analysis
+Deep_analysis/
+
 # Pictures
 *.png
 

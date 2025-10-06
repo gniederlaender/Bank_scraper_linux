@@ -27,6 +27,9 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import glob
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import numpy as np
 
 # Load environment variables
 load_dotenv()
@@ -583,6 +586,119 @@ class AustrianBankScraper:
         finally:
             conn.close()
 
+    def generate_interest_rate_chart(self):
+        """Generate interest rate chart using the database view"""
+        try:
+            conn = sqlite3.connect('austrian_banks.db')
+            
+            # Check if view exists
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='view' AND name='interest_rates_chart_ready'")
+            view_exists = cursor.fetchone()
+            
+            if not view_exists:
+                logger.warning("Chart-ready view does not exist, skipping chart generation")
+                return False
+            
+            # Extract data from the view
+            query = """
+            SELECT 
+                bank_name,
+                effektiver_jahreszins_numeric as effektiver_jahreszins,
+                date_scraped
+            FROM interest_rates_chart_ready 
+            WHERE effektiver_jahreszins_numeric IS NOT NULL 
+            ORDER BY date_scraped, bank_name
+            """
+            
+            df = pd.read_sql_query(query, conn)
+            df['date_scraped'] = pd.to_datetime(df['date_scraped'])
+            
+            if df.empty:
+                logger.warning("No data available for chart generation")
+                return False
+            
+            # Group by bank and date
+            chart_data = {}
+            banks = df['bank_name'].unique()
+            
+            for bank in banks:
+                bank_data = df[df['bank_name'] == bank].copy()
+                bank_data = bank_data.sort_values('date_scraped')
+                
+                # Group by date and take the average rate for that day
+                daily_rates = bank_data.groupby(bank_data['date_scraped'].dt.date)['effektiver_jahreszins'].mean()
+                
+                chart_data[bank] = {
+                    'dates': daily_rates.index.tolist(),
+                    'rates': daily_rates.values.tolist()
+                }
+            
+            # Create the chart
+            plt.figure(figsize=(12, 6))
+            
+            # Define colors for banks
+            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
+            
+            for i, (bank, data) in enumerate(chart_data.items()):
+                if not data['dates'] or not data['rates']:
+                    continue
+                    
+                # Convert dates to datetime objects
+                dates = [datetime.combine(d, datetime.min.time()) for d in data['dates']]
+                
+                plt.plot(dates, data['rates'], 
+                        marker='o', 
+                        linewidth=2.5, 
+                        markersize=6,
+                        label=bank, 
+                        color=colors[i % len(colors)])
+            
+            # Customize the plot
+            plt.title('Effective Interest Rate Development - Austrian Banks', 
+                      fontsize=14, fontweight='bold', pad=15)
+            plt.xlabel('Date', fontsize=11, fontweight='bold')
+            plt.ylabel('Effective Interest Rate (%)', fontsize=11, fontweight='bold')
+            
+            # Format x-axis
+            plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d.%m.%Y'))
+            plt.xticks(rotation=45)
+            
+            # Add grid
+            plt.grid(True, alpha=0.3, linestyle='--')
+            
+            # Add legend
+            plt.legend(loc='best', frameon=True, shadow=True)
+            
+            # Adjust layout
+            plt.tight_layout()
+            
+            # Save chart
+            chart_filename = 'interest_rate_chart.png'
+            plt.savefig(chart_filename, dpi=300, bbox_inches='tight', 
+                       facecolor='white', edgecolor='none')
+            plt.close()  # Close the figure to free memory
+            
+            logger.info(f"Interest rate chart generated successfully: {chart_filename}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error generating interest rate chart: {str(e)}")
+            return False
+        finally:
+            if 'conn' in locals():
+                conn.close()
+
+    def _get_chart_base64(self):
+        """Convert chart image to base64 for HTML embedding"""
+        try:
+            import base64
+            with open('interest_rate_chart.png', 'rb') as img_file:
+                return base64.b64encode(img_file.read()).decode('utf-8')
+        except Exception as e:
+            logger.error(f"Error converting chart to base64: {str(e)}")
+            return ""
+
     def generate_comparison_html(self):
         """Generate an HTML page comparing the latest interest rates from all banks"""
         try:
@@ -613,6 +729,9 @@ class AustrianBankScraper:
                 row_dict = dict(zip(column_names, row))
                 rows_dict.append(row_dict)
             
+            # Check if chart exists
+            chart_exists = os.path.exists('interest_rate_chart.png')
+            
             # Create HTML content
             html_content = f'''
             <!DOCTYPE html>
@@ -639,6 +758,25 @@ class AustrianBankScraper:
                         color: #333;
                         text-align: center;
                         margin-bottom: 30px;
+                    }}
+                    .chart-container {{
+                        text-align: center;
+                        margin-bottom: 30px;
+                        padding: 20px;
+                        background-color: #fafafa;
+                        border-radius: 8px;
+                        border: 1px solid #e0e0e0;
+                    }}
+                    .chart-container h2 {{
+                        color: #2c3e50;
+                        margin-bottom: 15px;
+                        font-size: 1.3em;
+                    }}
+                    .chart-container img {{
+                        max-width: 100%;
+                        height: auto;
+                        border-radius: 4px;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
                     }}
                     .table-responsive {{
                         width: 100%;
@@ -691,6 +829,13 @@ class AustrianBankScraper:
                             border-radius: 0;
                             box-shadow: none;
                         }}
+                        .chart-container {{
+                            padding: 10px;
+                            margin-bottom: 20px;
+                        }}
+                        .chart-container h2 {{
+                            font-size: 1.1em;
+                        }}
                         table {{
                             font-size: 12px;
                             min-width: 400px;
@@ -708,6 +853,12 @@ class AustrianBankScraper:
             <body>
                 <div class="container">
                     <h1>Konsumkredit Konditionenvergleich Österreich</h1>
+                    {f'''
+                    <div class="chart-container">
+                        <h2>Zinsentwicklung</h2>
+                        <img src="data:image/png;base64,{self._get_chart_base64()}" alt="Interest Rate Development Chart">
+                    </div>
+                    ''' if chart_exists else ''}
                     <div class="table-responsive">
                         <table>
                             <thead>
@@ -790,7 +941,7 @@ class AustrianBankScraper:
             email_port = int(os.getenv('EMAIL_PORT', '587'))
             email_user = os.getenv('EMAIL_USER')
             email_password = os.getenv('EMAIL_PASSWORD')
-            email_recipients = os.getenv('EMAIL_RECIPIENTS', '').split(',')
+            email_recipients = os.getenv('EMAIL_RECIPIENTS_KONSUMKREDIT', '').split(',')
 
             if not all([email_host, email_port, email_user, email_password, email_recipients]):
                 logger.error("Missing email configuration in .env file")
@@ -806,42 +957,42 @@ class AustrianBankScraper:
             html_part = MIMEText(html_content, 'html')
             msg.attach(html_part)
 
-            # Add attachments from screenshots folder
-            screenshots_dir = './screenshots'
-            if os.path.exists(screenshots_dir):
-                # Get all files from screenshots directory
-                screenshot_files = glob.glob(os.path.join(screenshots_dir, '*'))
-                
-                for file_path in screenshot_files:
-                    if os.path.isfile(file_path):
-                        try:
-                            # Get filename for attachment name
-                            filename = os.path.basename(file_path)
-                            
-                            # Open the file
-                            with open(file_path, 'rb') as attachment:
-                                # Create MIME base object
-                                part = MIMEBase('application', 'octet-stream')
-                                part.set_payload(attachment.read())
-                            
-                            # Encode the attachment
-                            encoders.encode_base64(part)
-                            
-                            # Add header
-                            part.add_header(
-                                'Content-Disposition',
-                                f'attachment; filename= {filename}'
-                            )
-                            
-                            # Attach to message
-                            msg.attach(part)
-                            
-                            logger.info(f"Attached screenshot: {filename}")
-                            
-                        except Exception as e:
-                            logger.error(f"Error attaching {file_path}: {str(e)}")
-            else:
-                logger.warning("Screenshots directory not found")
+            # Add attachments from screenshots folder (COMMENTED OUT)
+            # screenshots_dir = './screenshots'
+            # if os.path.exists(screenshots_dir):
+            #     # Get all files from screenshots directory
+            #     screenshot_files = glob.glob(os.path.join(screenshots_dir, '*'))
+            #     
+            #     for file_path in screenshot_files:
+            #         if os.path.isfile(file_path):
+            #             try:
+            #                 # Get filename for attachment name
+            #                 filename = os.path.basename(file_path)
+            #                 
+            #                 # Open the file
+            #                 with open(file_path, 'rb') as attachment:
+            #                     # Create MIME base object
+            #                     part = MIMEBase('application', 'octet-stream')
+            #                     part.set_payload(attachment.read())
+            #                 
+            #                 # Encode the attachment
+            #                 encoders.encode_base64(part)
+            #                 
+            #                 # Add header
+            #                 part.add_header(
+            #                     'Content-Disposition',
+            #                     f'attachment; filename= {filename}'
+            #                 )
+            #                 
+            #                 # Attach to message
+            #                 msg.attach(part)
+            #                 
+            #                 logger.info(f"Attached screenshot: {filename}")
+            #                 
+            #             except Exception as e:
+            #                 logger.error(f"Error attaching {file_path}: {str(e)}")
+            # else:
+            #     logger.warning("Screenshots directory not found")
 
             # Send email
             with smtplib.SMTP(email_host, email_port) as server:
@@ -864,6 +1015,7 @@ class AustrianBankScraper:
                     time.sleep(2)  # Polite delay between banks
             
             self.export_to_excel()
+            self.generate_interest_rate_chart()  # Generate chart after data scraping
             self.generate_comparison_html()
             
         except Exception as e:

@@ -8,6 +8,7 @@ source venv/bin/activate
 
 # Run the Python script
 python austrian_bankscraper_linux.py
+python austrian_bankscraper_refactored.py
 
 # Deactivate virtual environment
 deactivate
