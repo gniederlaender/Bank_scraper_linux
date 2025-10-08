@@ -62,7 +62,28 @@ def extract_text(page, text_selector: str) -> str:
         return ""
 
 
-def screen1(page) -> None:
+def get_fixierung_values_for_laufzeit(laufzeit_jahre: int) -> List[int]:
+    """
+    Determine the Fixierung slider values to test based on Laufzeit.
+    Rule: Fixierung cannot exceed Laufzeit.
+    Returns list of years: 0, 5, 10, 15, etc., up to Laufzeit.
+    """
+    fixierung_values = []
+    current = 0
+    while current <= laufzeit_jahre:
+        fixierung_values.append(current)
+        if current == 0:
+            current = 5
+        else:
+            current += 5
+    return fixierung_values
+
+
+def screen1(page, laufzeit_jahre: int = 35) -> None:
+    """
+    Screen 1: Set initial parameters
+    Note: We set to MAXIMUM Laufzeit (35) here, then adjust on Screen 4
+    """
     page.goto("https://durchblicker.at/kreditrechner", wait_until="load")
 
     # Accept cookies if banner appears
@@ -113,16 +134,16 @@ def screen1(page) -> None:
         except Exception:
             pass
 
-    # Set Laufzeit to 30 (directly target the #laufzeit input field)
+    # Set Laufzeit to maximum (35 Jahre) - will be adjusted on Screen 4
     try:
         laufzeit_input = page.locator("#laufzeit").first
         laufzeit_input.wait_for(state="visible", timeout=8000)
         laufzeit_input.click()
         page.keyboard.press("Control+A")
         page.keyboard.press("Delete")
-        laufzeit_input.type("30", delay=50)
+        laufzeit_input.type(str(laufzeit_jahre), delay=50)
         laufzeit_input.blur()
-        print("[INFO] Laufzeit set to 30 via #laufzeit input", flush=True)
+        print(f"[INFO] Laufzeit set to {laufzeit_jahre} via #laufzeit input (max value)", flush=True)
     except Exception as e:
         print(f"[WARN] Could not set Laufzeit via #laufzeit: {e}", flush=True)
         # Fallback
@@ -132,7 +153,7 @@ def screen1(page) -> None:
             input_box.click()
             page.keyboard.press("Control+A")
             page.keyboard.press("Delete")
-            input_box.type("30")
+            input_box.type(str(laufzeit_jahre))
         except Exception:
             pass
 
@@ -512,7 +533,7 @@ def screen3(page) -> None:
         else:
             set_select_like(page, "Ihre berufliche Situation", "Angestellt")
 
-    # Ihr Netto-Einkommen -> 5200 (via known id, requires special handling due to blur event)
+    # Ihr Netto-Einkommen -> 8500 (via known id, requires special handling due to blur event)
     print("[INFO] Setting Netto-Einkommen...", flush=True)
     try:
         einkommen_input = page.locator("#input_immokredit_haushalt_einkommen").first
@@ -522,7 +543,7 @@ def screen3(page) -> None:
         page.keyboard.press("Control+A")
         page.keyboard.press("Delete")
         time.sleep(0.2)
-        einkommen_input.type("5200", delay=50)
+        einkommen_input.type("8500", delay=50)
         time.sleep(0.3)
         einkommen_input.blur()  # Trigger the blur event that sets the value
         time.sleep(0.5)  # Wait for JS to process
@@ -530,7 +551,7 @@ def screen3(page) -> None:
     except Exception as e:
         print(f"[WARN] Could not set Netto-Einkommen: {e}", flush=True)
         try:
-            fill_number_near_label(page, "Ihr Netto-Einkommen", "5200")
+            fill_number_near_label(page, "Ihr Netto-Einkommen", "8500")
         except Exception:
             pass
 
@@ -587,7 +608,21 @@ def screen3(page) -> None:
         print(f"[DEBUG] Error checking for validation messages: {e}", flush=True)
 
 
-def screen4(page) -> List[Dict[str, Any]]:
+def screen4(page, laufzeiten_to_scrape: List[int] = None) -> Dict[int, List[Dict[str, Any]]]:
+    """
+    Screen 4: Results page with TWO sliders (Laufzeit and Fixierung)
+    This function stays on Screen 4 and toggles BOTH sliders to capture all combinations.
+    
+    Args:
+        page: Playwright page object
+        laufzeiten_to_scrape: List of Laufzeiten to scrape (default: [35, 30, 25, 20, 15])
+    
+    Returns:
+        Dict mapping laufzeit -> list of variations
+    """
+    if laufzeiten_to_scrape is None:
+        laufzeiten_to_scrape = [35, 30, 25, 20, 15]
+    
     # Wait for results to load (look for typical result elements)
     try:
         page.wait_for_load_state("networkidle", timeout=30000)
@@ -655,6 +690,21 @@ def screen4(page) -> List[Dict[str, Any]]:
         
         return details
     
+    def set_laufzeit_slider(value: int) -> None:
+        """Set the Laufzeit slider on Screen 4 to a specific value"""
+        try:
+            slider = page.locator("#laufzeitslider").first
+            slider.wait_for(state="visible", timeout=8000)
+            slider.fill(str(value))
+            # Trigger change event
+            slider.dispatch_event("change")
+            slider.dispatch_event("input")
+            # Wait for UI to update
+            time.sleep(2)
+            print(f"[INFO] Laufzeit slider set to {value} years", flush=True)
+        except Exception as e:
+            print(f"[WARN] Error setting Laufzeit slider to {value}: {e}", flush=True)
+    
     def set_fixierung_slider(value: int) -> None:
         """Set the Fixierung slider to a specific value (fixed interest period in years)"""
         try:
@@ -663,54 +713,80 @@ def screen4(page) -> List[Dict[str, Any]]:
             slider.fill(str(value))
             # Trigger change event
             slider.dispatch_event("change")
+            slider.dispatch_event("input")
             # Wait for UI to update
             time.sleep(2)
             print(f"[INFO] Fixierung slider set to {value} years", flush=True)
         except Exception as e:
-            print(f"[WARN] Error setting slider to {value}: {e}", flush=True)
+            print(f"[WARN] Error setting Fixierung slider to {value}: {e}", flush=True)
     
-    # Test slider at different values and capture data after each change
-    slider_values = [0, 5, 10, 15, 20, 25]
-    variations_data = []
+    # Dictionary to store all variations organized by Laufzeit
+    all_data_by_laufzeit = {}
     
-    for i, value in enumerate(slider_values):
-        print(f"\n[INFO] Testing Fixierung slider at {value} years...", flush=True)
-        set_fixierung_slider(value)
+    # Loop through each Laufzeit (descending order: 35, 30, 25, 20, 15...)
+    for laufzeit in laufzeiten_to_scrape:
+        print("\n" + "="*70)
+        print(f"[INFO] Processing Laufzeit: {laufzeit} Jahre (on Screen 4)")
+        print("="*70)
         
-        # Wait a moment for the UI to update after slider change
-        time.sleep(1)
+        # Set the Laufzeit slider on Screen 4
+        set_laufzeit_slider(laufzeit)
         
-        # Scrape details immediately after slider change
-        print(f"[INFO] Capturing financial data at {value} years Fixierung...", flush=True)
-        details = scrape_offer_details()
-        print(f"[INFO] Financial data at {value} years Fixierung:", flush=True)
-        for key, val in details.items():
-            print(f"  {key}: {val}", flush=True)
+        # Determine appropriate Fixierung values for this Laufzeit
+        fixierung_values = get_fixierung_values_for_laufzeit(laufzeit)
+        print(f"[INFO] Fixierung values for {laufzeit} Jahre: {fixierung_values}", flush=True)
         
-        # Convert to structured format for database
-        variation_data = {
-            'fixierung_jahre': value,
-            'rate': parse_currency_to_float(details.get('Rate')),
-            'zinssatz': details.get('Zinssatz', '-'),
-            'laufzeit': details.get('Laufzeit', '-'),
-            'anschlusskondition': details.get('Anschlusskondition'),
-            'effektiver_zinssatz': details.get('Effektiver Zinssatz', '-'),
-            'auszahlungsbetrag': parse_currency_to_float(details.get('Auszahlungsbetrag')),
-            'einberechnete_kosten': parse_currency_to_float(details.get('Einberechnete Kosten')),
-            'kreditbetrag': parse_currency_to_float(details.get('Kreditbetrag')),
-            'gesamtbetrag': parse_currency_to_float(details.get('Zu zahlender Gesamtbetrag')),
-            'besicherung': details.get('Besicherung', '-')
-        }
-        variations_data.append(variation_data)
+        variations_data = []
         
-        # Take a screenshot after each slider change to verify the data
-        screenshot_name = f"screen4_fixierung_{value}jahre"
-        page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename(screenshot_name)), full_page=True)
-        print(f"[INFO] Screenshot saved: {screenshot_name}", flush=True)
+        # Loop through each Fixierung value
+        for fixierung in fixierung_values:
+            print(f"\n[INFO] Setting Fixierung to {fixierung} years (Laufzeit: {laufzeit})...", flush=True)
+            set_fixierung_slider(fixierung)
+            
+            # Wait a moment for the UI to update
+            time.sleep(1)
+            
+            # Scrape details
+            print(f"[INFO] Capturing data at {laufzeit}J Laufzeit / {fixierung}J Fixierung...", flush=True)
+            details = scrape_offer_details()
+            
+            if details and any(v != '-' for v in details.values()):
+                print(f"[INFO] Data captured successfully:", flush=True)
+                for key, val in details.items():
+                    if val != '-':
+                        print(f"  {key}: {val}", flush=True)
+            else:
+                print(f"[WARN] No data captured or all fields empty", flush=True)
+            
+            # Convert to structured format
+            variation_data = {
+                'fixierung_jahre': fixierung,
+                'rate': parse_currency_to_float(details.get('Rate')),
+                'zinssatz': details.get('Zinssatz', '-'),
+                'laufzeit': details.get('Laufzeit', '-'),
+                'anschlusskondition': details.get('Anschlusskondition'),
+                'effektiver_zinssatz': details.get('Effektiver Zinssatz', '-'),
+                'auszahlungsbetrag': parse_currency_to_float(details.get('Auszahlungsbetrag')),
+                'einberechnete_kosten': parse_currency_to_float(details.get('Einberechnete Kosten')),
+                'kreditbetrag': parse_currency_to_float(details.get('Kreditbetrag')),
+                'gesamtbetrag': parse_currency_to_float(details.get('Zu zahlender Gesamtbetrag')),
+                'besicherung': details.get('Besicherung', '-')
+            }
+            variations_data.append(variation_data)
+            
+            # Take screenshot
+            screenshot_name = f"screen4_laufzeit_{laufzeit}j_fixierung_{fixierung}j"
+            page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename(screenshot_name)), full_page=True)
+            print(f"[INFO] Screenshot: {screenshot_name}", flush=True)
+        
+        # Store variations for this Laufzeit
+        all_data_by_laufzeit[laufzeit] = variations_data
+        print(f"\n[INFO] ✓ Laufzeit {laufzeit} Jahre complete: {len(variations_data)} variations captured")
     
-    page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen4")), full_page=True)
+    # Take final screenshot
+    page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen4_final")), full_page=True)
     
-    return variations_data
+    return all_data_by_laufzeit
 
 
 def run(playwright: Playwright) -> int:
@@ -721,49 +797,83 @@ def run(playwright: Playwright) -> int:
     # Make failures surface faster
     page.set_default_timeout(15000)
     
-    # Metadata for this scraping run (hardcoded values from our current setup)
-    run_metadata = {
-        'scrape_date': datetime.now(),
+    # Define Laufzeiten to scrape (descending order for Screen 4 slider)
+    # Current range: 35, 30, 25, 20, 15 (can expand to include 10, 5)
+    laufzeiten_to_scrape = [35, 30, 25, 20, 15]
+    
+    # Start with MAXIMUM Laufzeit for Screen 1
+    max_laufzeit = max(laufzeiten_to_scrape)
+    
+    # Base metadata (same for all runs)
+    base_metadata = {
         'kreditbetrag': 500000.00,
-        'laufzeit_jahre': 30,
         'kaufpreis': 500000.00,
         'kaufnebenkosten': 50000.00,
         'eigenmittel': 150000.00,
         'haushalt_alter': 45,
-        'haushalt_einkommen': 5200.00,
+        'haushalt_einkommen': 8500.00,
         'haushalt_nutzflaeche': 100,
         'haushalt_kreditraten': 300.00,
-        'notes': 'Automated scraping run from test_durchblicker.py'
     }
     
     try:
-        print("[INFO] Screen 1 start", flush=True)
-        screen1(page)
+        print("\n" + "="*80)
+        print(f"[INFO] Multi-Laufzeit Scraping Session Started")
+        print(f"[INFO] Will scrape Laufzeiten: {laufzeiten_to_scrape}")
+        print("="*80 + "\n")
+        
+        # Navigate through Screens 1-3 ONCE with maximum Laufzeit
+        print(f"[INFO] Screen 1 start (Initial Laufzeit: {max_laufzeit} Jahre)", flush=True)
+        screen1(page, laufzeit_jahre=max_laufzeit)
         print("[INFO] Screen 1 done", flush=True)
+        
         print("[INFO] Screen 2 start", flush=True)
         screen2(page)
         print("[INFO] Screen 2 done", flush=True)
+        
         print("[INFO] Screen 3 start", flush=True)
         screen3(page)
         print("[INFO] Screen 3 done", flush=True)
-        print("[INFO] Screen 4 start", flush=True)
-        variations_data = screen4(page)
-        print("[INFO] Screen 4 done", flush=True)
         
-        # Save to database
-        print("\n[INFO] Saving data to database...", flush=True)
-        scraping_data = {
-            'run_metadata': run_metadata,
-            'fixierung_variations': variations_data
-        }
+        # Screen 4: Toggle both sliders to capture ALL Laufzeit/Fixierung combinations
+        print("[INFO] Screen 4 start (will process all Laufzeiten here)", flush=True)
+        all_data_by_laufzeit = screen4(page, laufzeiten_to_scrape=laufzeiten_to_scrape)
+        print("[INFO] Screen 4 done - All Laufzeiten processed", flush=True)
         
-        try:
-            run_id = save_scraping_data(scraping_data)
-            print(f"[INFO] ✅ Data saved to database! Run ID: {run_id}", flush=True)
-            print(f"[INFO]    - Variations saved: {len(variations_data)}", flush=True)
-        except Exception as e:
-            print(f"[ERROR] Failed to save to database: {e}", flush=True)
-            print("[WARN] Scraping completed but data NOT saved to database", flush=True)
+        # Save each Laufzeit as a separate database run
+        print("\n" + "="*80)
+        print("[INFO] Saving data to database...")
+        print("="*80)
+        
+        successful_runs = 0
+        total_variations = 0
+        
+        for laufzeit, variations_data in all_data_by_laufzeit.items():
+            run_metadata = base_metadata.copy()
+            run_metadata['scrape_date'] = datetime.now()
+            run_metadata['laufzeit_jahre'] = laufzeit
+            run_metadata['notes'] = f'Multi-Laufzeit scraping (Screen 4 sliders) - {laufzeit} Jahre'
+            
+            scraping_data = {
+                'run_metadata': run_metadata,
+                'fixierung_variations': variations_data
+            }
+            
+            try:
+                run_id = save_scraping_data(scraping_data)
+                print(f"[INFO] ✅ Run ID {run_id}: {laufzeit} Jahre, {len(variations_data)} variations", flush=True)
+                successful_runs += 1
+                total_variations += len(variations_data)
+            except Exception as e:
+                print(f"[ERROR] Failed to save Laufzeit {laufzeit}: {e}", flush=True)
+        
+        print("\n" + "="*80)
+        print(f"[INFO] 🎉 Multi-Laufzeit Scraping Complete!")
+        print("="*80)
+        print(f"[INFO] Successful runs: {successful_runs}/{len(laufzeiten_to_scrape)}")
+        print(f"[INFO] Total variations captured: {total_variations}")
+        print(f"[INFO] Laufzeiten scraped: {list(all_data_by_laufzeit.keys())}")
+        print("="*80 + "\n")
         
         return 0
     finally:

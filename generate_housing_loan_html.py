@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import json
 
 DB_PATH = Path("/opt/Bankcomparison/austrian_banks_housing_loan.db")
 HTML_PATH = Path("/opt/Bankcomparison/bank_comparison_housing_loan_durchblicker.html")
@@ -268,6 +269,14 @@ def generate_html():
         # Sort by date descending and get the latest
         sorted_runs = sorted(runs_list, key=lambda x: x['run']['scrape_date'], reverse=True)
         latest_by_laufzeit[laufzeit] = sorted_runs[0]
+    
+    # Prepare table data for JavaScript (must be JSON-serializable)
+    table_data_for_js = {}
+    for laufzeit, data in latest_by_laufzeit.items():
+        table_data_for_js[int(laufzeit)] = {
+            'run': data['run'],
+            'variations': data['variations']
+        }
     
     # Create HTML content
     html_content = f'''<!DOCTYPE html>
@@ -543,10 +552,10 @@ def generate_html():
             
             <script>
                 // Store trace metadata
-                const traceMetadata = {str(trace_metadata)};
+                const traceMetadata = {json.dumps(trace_metadata)};
                 
                 // Store table data for each Laufzeit
-                const tableData = {str({int(k): {'run': v['run'], 'variations': v['variations']} for k, v in latest_by_laufzeit.items()})};
+                const tableData = {json.dumps(table_data_for_js)};
                 
                 // Current filter states
                 let currentLaufzeit = 'all';
