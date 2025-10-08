@@ -5,8 +5,10 @@ import time
 from datetime import datetime
 import re
 from pathlib import Path
+from typing import Dict, List, Any, Optional
 
 from playwright.sync_api import Playwright, sync_playwright, TimeoutError as PlaywrightTimeoutError
+from db_helper import save_scraping_data
 
 
 SCREENSHOTS_DIR = Path("/opt/Bankcomparison/screenshots")
@@ -27,6 +29,28 @@ def log_print(label: str, value: str) -> None:
 
 def wait_for_text(page, text: str, timeout_ms: int = 15000):
     return page.locator(f"text={text}").first.wait_for(state="visible", timeout=timeout_ms)
+
+
+def parse_currency_to_float(value: Optional[str]) -> Optional[float]:
+    """
+    Parse currency string to float
+    Examples: "€ 1.948" -> 1948.00, "1.948,50 €" -> 1948.50
+    """
+    if not value or value == "-":
+        return None
+    
+    # Remove currency symbols and spaces
+    value = value.replace("€", "").replace(" ", "").strip()
+    
+    # German format: 1.234,56 -> 1234.56
+    # Remove thousand separators (.) and replace comma with dot
+    value = value.replace(".", "")
+    value = value.replace(",", ".")
+    
+    try:
+        return float(value)
+    except (ValueError, AttributeError):
+        return None
 
 
 def extract_text(page, text_selector: str) -> str:
@@ -488,17 +512,27 @@ def screen3(page) -> None:
         else:
             set_select_like(page, "Ihre berufliche Situation", "Angestellt")
 
-    # Ihr Netto-Einkommen -> 5200 (via known id first)
+    # Ihr Netto-Einkommen -> 5200 (via known id, requires special handling due to blur event)
     print("[INFO] Setting Netto-Einkommen...", flush=True)
-    if not clear_type_and_blur("#input_immokredit_haushalt_einkommen", "5200"):
-        print("[WARN] Primary Netto-Einkommen selector failed, trying alternatives...", flush=True)
-        if not clear_type_and_blur("input[id*='haushalt'][id*='netto'][id*='eink'], #input_immokredit_haushalt_netto", "5200"):
-            print("[WARN] Alternative Netto-Einkommen selectors failed, using label-based approach...", flush=True)
+    try:
+        einkommen_input = page.locator("#input_immokredit_haushalt_einkommen").first
+        einkommen_input.wait_for(state="visible", timeout=8000)
+        einkommen_input.click()
+        time.sleep(0.3)  # Small delay after click
+        page.keyboard.press("Control+A")
+        page.keyboard.press("Delete")
+        time.sleep(0.2)
+        einkommen_input.type("5200", delay=50)
+        time.sleep(0.3)
+        einkommen_input.blur()  # Trigger the blur event that sets the value
+        time.sleep(0.5)  # Wait for JS to process
+        print("[INFO] Netto-Einkommen set via direct input", flush=True)
+    except Exception as e:
+        print(f"[WARN] Could not set Netto-Einkommen: {e}", flush=True)
+        try:
             fill_number_near_label(page, "Ihr Netto-Einkommen", "5200")
-        else:
-            print("[INFO] Netto-Einkommen set via alternative selector", flush=True)
-    else:
-        print("[INFO] Netto-Einkommen set via primary selector", flush=True)
+        except Exception:
+            pass
 
     # Wohnnutzfläche -> 100 via known id
     if not clear_type_and_blur("#input_immokredit_haushalt_nutzflaeche", "100"):
@@ -553,7 +587,7 @@ def screen3(page) -> None:
         print(f"[DEBUG] Error checking for validation messages: {e}", flush=True)
 
 
-def screen4(page) -> None:
+def screen4(page) -> List[Dict[str, Any]]:
     # Wait for results to load (look for typical result elements)
     try:
         page.wait_for_load_state("networkidle", timeout=30000)
@@ -621,8 +655,8 @@ def screen4(page) -> None:
         
         return details
     
-    def set_verzinsung_slider(value: int) -> None:
-        """Set the Verzinsung slider to a specific value"""
+    def set_fixierung_slider(value: int) -> None:
+        """Set the Fixierung slider to a specific value (fixed interest period in years)"""
         try:
             slider = page.locator("#fixverzinsungslider").first
             slider.wait_for(state="visible", timeout=8000)
@@ -631,32 +665,52 @@ def screen4(page) -> None:
             slider.dispatch_event("change")
             # Wait for UI to update
             time.sleep(2)
-            print(f"[INFO] Verzinsung slider set to {value}%", flush=True)
+            print(f"[INFO] Fixierung slider set to {value} years", flush=True)
         except Exception as e:
             print(f"[WARN] Error setting slider to {value}: {e}", flush=True)
     
     # Test slider at different values and capture data after each change
     slider_values = [0, 5, 10, 15, 20, 25]
+    variations_data = []
+    
     for i, value in enumerate(slider_values):
-        print(f"\n[INFO] Testing Verzinsung slider at {value}%...", flush=True)
-        set_verzinsung_slider(value)
+        print(f"\n[INFO] Testing Fixierung slider at {value} years...", flush=True)
+        set_fixierung_slider(value)
         
         # Wait a moment for the UI to update after slider change
         time.sleep(1)
         
         # Scrape details immediately after slider change
-        print(f"[INFO] Capturing financial data at {value}% Verzinsung...", flush=True)
+        print(f"[INFO] Capturing financial data at {value} years Fixierung...", flush=True)
         details = scrape_offer_details()
-        print(f"[INFO] Financial data at {value}% Verzinsung:", flush=True)
+        print(f"[INFO] Financial data at {value} years Fixierung:", flush=True)
         for key, val in details.items():
             print(f"  {key}: {val}", flush=True)
         
+        # Convert to structured format for database
+        variation_data = {
+            'fixierung_jahre': value,
+            'rate': parse_currency_to_float(details.get('Rate')),
+            'zinssatz': details.get('Zinssatz', '-'),
+            'laufzeit': details.get('Laufzeit', '-'),
+            'anschlusskondition': details.get('Anschlusskondition'),
+            'effektiver_zinssatz': details.get('Effektiver Zinssatz', '-'),
+            'auszahlungsbetrag': parse_currency_to_float(details.get('Auszahlungsbetrag')),
+            'einberechnete_kosten': parse_currency_to_float(details.get('Einberechnete Kosten')),
+            'kreditbetrag': parse_currency_to_float(details.get('Kreditbetrag')),
+            'gesamtbetrag': parse_currency_to_float(details.get('Zu zahlender Gesamtbetrag')),
+            'besicherung': details.get('Besicherung', '-')
+        }
+        variations_data.append(variation_data)
+        
         # Take a screenshot after each slider change to verify the data
-        screenshot_name = f"screen4_verzinsung_{value}percent"
+        screenshot_name = f"screen4_fixierung_{value}jahre"
         page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename(screenshot_name)), full_page=True)
         print(f"[INFO] Screenshot saved: {screenshot_name}", flush=True)
     
     page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen4")), full_page=True)
+    
+    return variations_data
 
 
 def run(playwright: Playwright) -> int:
@@ -666,6 +720,22 @@ def run(playwright: Playwright) -> int:
     page = context.new_page()
     # Make failures surface faster
     page.set_default_timeout(15000)
+    
+    # Metadata for this scraping run (hardcoded values from our current setup)
+    run_metadata = {
+        'scrape_date': datetime.now(),
+        'kreditbetrag': 500000.00,
+        'laufzeit_jahre': 30,
+        'kaufpreis': 500000.00,
+        'kaufnebenkosten': 50000.00,
+        'eigenmittel': 150000.00,
+        'haushalt_alter': 45,
+        'haushalt_einkommen': 5200.00,
+        'haushalt_nutzflaeche': 100,
+        'haushalt_kreditraten': 300.00,
+        'notes': 'Automated scraping run from test_durchblicker.py'
+    }
+    
     try:
         print("[INFO] Screen 1 start", flush=True)
         screen1(page)
@@ -677,8 +747,24 @@ def run(playwright: Playwright) -> int:
         screen3(page)
         print("[INFO] Screen 3 done", flush=True)
         print("[INFO] Screen 4 start", flush=True)
-        screen4(page)
+        variations_data = screen4(page)
         print("[INFO] Screen 4 done", flush=True)
+        
+        # Save to database
+        print("\n[INFO] Saving data to database...", flush=True)
+        scraping_data = {
+            'run_metadata': run_metadata,
+            'fixierung_variations': variations_data
+        }
+        
+        try:
+            run_id = save_scraping_data(scraping_data)
+            print(f"[INFO] ✅ Data saved to database! Run ID: {run_id}", flush=True)
+            print(f"[INFO]    - Variations saved: {len(variations_data)}", flush=True)
+        except Exception as e:
+            print(f"[ERROR] Failed to save to database: {e}", flush=True)
+            print("[WARN] Scraping completed but data NOT saved to database", flush=True)
+        
         return 0
     finally:
         context.close()

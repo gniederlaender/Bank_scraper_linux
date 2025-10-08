@@ -17,7 +17,7 @@ def create_database(db_path: Path = DB_PATH) -> None:
     
     Tables:
     - scraping_runs: Stores run metadata (input parameters)
-    - verzinsung_variations: Stores results for each Verzinsung variation
+    - fixierung_variations: Stores results for each Fixierung variation (fixed interest period in years)
     """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -40,12 +40,12 @@ def create_database(db_path: Path = DB_PATH) -> None:
         )
     """)
     
-    # Create verzinsung_variations table
+    # Create fixierung_variations table
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS verzinsung_variations (
+        CREATE TABLE IF NOT EXISTS fixierung_variations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id INTEGER,
-            verzinsung_percent INTEGER,
+            fixierung_jahre INTEGER,
             rate DECIMAL(10,2),
             zinssatz VARCHAR(100),
             laufzeit VARCHAR(50),
@@ -68,8 +68,8 @@ def create_database(db_path: Path = DB_PATH) -> None:
     """)
     
     cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_verzinsung_run 
-        ON verzinsung_variations(run_id)
+        CREATE INDEX IF NOT EXISTS idx_fixierung_run 
+        ON fixierung_variations(run_id)
     """)
     
     conn.commit()
@@ -128,13 +128,13 @@ def insert_scraping_run(metadata: Dict[str, Any], db_path: Path = DB_PATH) -> in
     return run_id
 
 
-def insert_verzinsung_variation(
+def insert_fixierung_variation(
     run_id: int, 
     variation_data: Dict[str, Any], 
     db_path: Path = DB_PATH
 ) -> int:
     """
-    Insert a Verzinsung variation result
+    Insert a Fixierung variation result (fixed interest period in years)
     
     Args:
         run_id: ID of the parent scraping run
@@ -148,9 +148,9 @@ def insert_verzinsung_variation(
     cursor = conn.cursor()
     
     cursor.execute("""
-        INSERT INTO verzinsung_variations (
+        INSERT INTO fixierung_variations (
             run_id,
-            verzinsung_percent,
+            fixierung_jahre,
             rate,
             zinssatz,
             laufzeit,
@@ -165,7 +165,7 @@ def insert_verzinsung_variation(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         run_id,
-        variation_data.get('verzinsung_percent'),
+        variation_data.get('fixierung_jahre'),
         variation_data.get('rate'),
         variation_data.get('zinssatz'),
         variation_data.get('laufzeit'),
@@ -191,7 +191,7 @@ def save_scraping_data(data: Dict[str, Any], db_path: Path = DB_PATH) -> int:
     Save complete scraping data (metadata + all variations) to database
     
     Args:
-        data: Dictionary with 'run_metadata' and 'verzinsung_variations' keys
+        data: Dictionary with 'run_metadata' and 'fixierung_variations' keys
         db_path: Path to database file
     
     Returns:
@@ -205,8 +205,8 @@ def save_scraping_data(data: Dict[str, Any], db_path: Path = DB_PATH) -> int:
     
     # Insert all variations
     variations_count = 0
-    for variation in data['verzinsung_variations']:
-        insert_verzinsung_variation(run_id, variation, db_path)
+    for variation in data['fixierung_variations']:
+        insert_fixierung_variation(run_id, variation, db_path)
         variations_count += 1
     
     print(f"[INFO] Saved run {run_id} with {variations_count} variations")
@@ -237,7 +237,7 @@ def get_all_runs(db_path: Path = DB_PATH) -> List[Dict[str, Any]]:
 
 def get_variations_for_run(run_id: int, db_path: Path = DB_PATH) -> List[Dict[str, Any]]:
     """
-    Retrieve all Verzinsung variations for a specific run
+    Retrieve all Fixierung variations for a specific run (fixed interest period in years)
     
     Args:
         run_id: ID of the scraping run
@@ -250,9 +250,9 @@ def get_variations_for_run(run_id: int, db_path: Path = DB_PATH) -> List[Dict[st
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT * FROM verzinsung_variations 
+        SELECT * FROM fixierung_variations 
         WHERE run_id = ?
-        ORDER BY verzinsung_percent
+        ORDER BY fixierung_jahre
     """, (run_id,))
     
     variations = [dict(row) for row in cursor.fetchall()]
@@ -271,7 +271,7 @@ def print_database_summary(db_path: Path = DB_PATH) -> None:
     runs_count = cursor.fetchone()[0]
     
     # Count variations
-    cursor.execute("SELECT COUNT(*) FROM verzinsung_variations")
+    cursor.execute("SELECT COUNT(*) FROM fixierung_variations")
     variations_count = cursor.fetchone()[0]
     
     # Get latest run

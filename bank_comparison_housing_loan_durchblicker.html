@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bank Comparison - Housing Loan Analysis (Interactive)</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.2em;
+        }
+        .subtitle {
+            text-align: center;
+            color: #7f8c8d;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+        .info-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            display: inline-block;
+            margin: 5px;
+            font-size: 0.9em;
+        }
+        .chart-container {
+            margin-bottom: 40px;
+            padding: 25px;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .chart-controls {
+            display: flex;
+            gap: 30px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .control-label {
+            font-weight: bold;
+            color: #2c3e50;
+            font-size: 14px;
+        }
+        select, button {
+            padding: 8px 15px;
+            border: 2px solid #667eea;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'Segoe UI', Arial;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        select {
+            background: white;
+            color: #2c3e50;
+        }
+        select:hover {
+            border-color: #764ba2;
+        }
+        button {
+            background: white;
+            color: #667eea;
+        }
+        button.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        button:hover {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .run-info {
+            background-color: #ecf0f1;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            border-left: 5px solid #3498db;
+        }
+        .run-info h3 {
+            margin-top: 0;
+            color: #2c3e50;
+            font-size: 1.3em;
+        }
+        .run-info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px;
+            background-color: white;
+            border-radius: 4px;
+        }
+        .info-label {
+            font-weight: bold;
+            color: #34495e;
+        }
+        .info-value {
+            color: #2c3e50;
+            font-family: monospace;
+        }
+        .table-container {
+            overflow-x: auto;
+            margin-bottom: 30px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            font-size: 0.95em;
+        }
+        th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 12px;
+            text-align: left;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+        tr:nth-child(even) {
+            background-color: #fafbfc;
+        }
+        .fixierung-cell {
+            font-weight: bold;
+            color: #2c3e50;
+            background-color: #e8f4f8 !important;
+        }
+        .rate-cell {
+            font-weight: bold;
+            color: #27ae60;
+            font-size: 1.1em;
+        }
+        .timestamp {
+            text-align: center;
+            color: #7f8c8d;
+            font-size: 0.9em;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #ecf0f1;
+        }
+        .highlight {
+            background-color: #fff3cd !important;
+        }
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            .container {
+                padding: 15px;
+            }
+            h1 {
+                font-size: 1.5em;
+            }
+            .chart-container {
+                padding: 15px;
+            }
+            table {
+                font-size: 0.85em;
+            }
+            th, td {
+                padding: 8px 6px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏠 Housing Loan Comparison</h1>
+        <div class="subtitle">
+            Interactive Interest Rate Analysis
+            <br>
+            <span class="info-badge">📊 Combined Filters (Laufzeit AND Zinssatz)</span>
+            <span class="info-badge">🔍 Click legend to toggle lines</span>
+            <span class="info-badge">🖱️ Hover for details</span>
+        </div>
+        
+        <div class="run-info">
+            <h3>📊 Aktuellste Berechnung</h3>
+            <div class="run-info-grid">
+                <div class="info-item">
+                    <span class="info-label">Kreditbetrag:</span>
+                    <span class="info-value">€500,000</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Laufzeit:</span>
+                    <span class="info-value">15 Jahre</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Kaufpreis:</span>
+                    <span class="info-value">€500,000</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Kaufnebenkosten:</span>
+                    <span class="info-value">€50,000</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Eigenmittel:</span>
+                    <span class="info-value">€150,000</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Haushalt Alter:</span>
+                    <span class="info-value">45 Jahre</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Netto-Einkommen:</span>
+                    <span class="info-value">€5,200.00/Monat</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Wohnnutzfläche:</span>
+                    <span class="info-value">100 m²</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="chart-container">
+            <div class="chart-controls">
+                <div class="control-group">
+                    <span class="control-label">Laufzeit:</span>
+                    <select id="laufzeit-filter">
+                        <option value="all">Alle Laufzeiten</option>
+                        <option value="15">15 Jahre</option>
+                        <option value="20">20 Jahre</option>
+                        <option value="25">25 Jahre</option>
+                        <option value="30">30 Jahre</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <span class="control-label">Anzeigen:</span>
+                    <button id="btn-beide" class="active" onclick="setZinssatzFilter('beide')">Beide</button>
+                    <button id="btn-zinssatz" onclick="setZinssatzFilter('zinssatz')">Nur Zinssatz</button>
+                    <button id="btn-effektiver" onclick="setZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
+                </div>
+            </div>
+            
+            <html>
+<head><meta charset="utf-8" /></head>
+<body>
+    <div>                        <script type="text/javascript">window.PlotlyConfig = {MathJaxConfig: 'local'};</script>
+        <script charset="utf-8" src="https://cdn.plot.ly/plotly-3.1.1.min.js" integrity="sha256-HUEFyfiTnZJxCxur99FjbKYTvKSzwDaD3/x5TqHpFu4=" crossorigin="anonymous"></script>                <div id="plotly-chart" class="plotly-graph-div" style="height:600px; width:100%;"></div>            <script type="text/javascript">                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("plotly-chart")) {                    Plotly.newPlot(                        "plotly-chart",                        [{"customdata":[[15,"zinssatz",0],[15,"zinssatz",0],[15,"zinssatz",0],[15,"zinssatz",0],[15,"zinssatz",0]],"hovertemplate":"\u003cb\u003eFixierung: 0 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 15 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_0_laufzeit_15","line":{"color":"#1f77b4","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"0J fix - 15J ZinsS","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"SgwCK4cWAkAj2\u002fl+arwDQMHKoUW28wRAhxbZzvdTA0CWQ4ts5\u002fsCQA=="},"type":"scatter"},{"customdata":[[15,"effektiver",0],[15,"effektiver",0],[15,"effektiver",0],[15,"effektiver",0],[15,"effektiver",0]],"hovertemplate":"\u003cb\u003eFixierung: 0 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 15 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_0_laufzeit_15","line":{"color":"#1f77b4","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"0J fix - 15J EffZ","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"46WbxCCwA0C8dJMYBFYFQFpkO99PjQZAIbByaJHtBEAv3SQGgZUEQA=="},"type":"scatter"},{"customdata":[[15,"zinssatz",5],[15,"zinssatz",5],[15,"zinssatz",5],[15,"zinssatz",5],[15,"zinssatz",5]],"hovertemplate":"\u003cb\u003eFixierung: 5 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 15 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_5_laufzeit_15","line":{"color":"#2ca02c","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"5J fix - 15J ZinsS","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"FK5H4XoUCUCF61G4HoUJQFTjpZvEIApAObTIdr6fCEBoke18PzUKQA=="},"type":"scatter"},{"customdata":[[15,"effektiver",5],[15,"effektiver",5],[15,"effektiver",5],[15,"effektiver",5],[15,"effektiver",5]],"hovertemplate":"\u003cb\u003eFixierung: 5 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 15 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_5_laufzeit_15","line":{"color":"#2ca02c","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"5J fix - 15J EffZ","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"rkfhehSuCkAfhetRuB4LQO58PzVeugtA001iEFg5CkACK4cW2c4LQA=="},"type":"scatter"},{"customdata":[[15,"zinssatz",10],[15,"zinssatz",10],[15,"zinssatz",10],[15,"zinssatz",10],[15,"zinssatz",10]],"hovertemplate":"\u003cb\u003eFixierung: 10 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 15 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_10_laufzeit_15","line":{"color":"#ff7f0e","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"10J fix - 15J ZinsS","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"hxbZzvdTDkCwcmiR7XwOQGZmZmZm5hBAnu+nxku3EECmm8QgsPIQQA=="},"type":"scatter"},{"customdata":[[15,"effektiver",10],[15,"effektiver",10],[15,"effektiver",10],[15,"effektiver",10],[15,"effektiver",10]],"hovertemplate":"\u003cb\u003eFixierung: 10 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 15 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_10_laufzeit_15","line":{"color":"#ff7f0e","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"10J fix - 15J EffZ","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"IbByaJHtD0AlBoGVQwsQQDMzMzMzsxFAarx0kxiEEUBzaJHtfL8RQA=="},"type":"scatter"},{"customdata":[[15,"zinssatz",15],[15,"zinssatz",15],[15,"zinssatz",15],[15,"zinssatz",15],[15,"zinssatz",15]],"hovertemplate":"\u003cb\u003eFixierung: 15 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 15 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_15_laufzeit_15","line":{"color":"#d62728","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"15J fix - 15J ZinsS","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"XrpJDAIrE0D2KFyPwvURQAAAAAAAABRAxSCwcmiRE0B3vp8aL10SQA=="},"type":"scatter"},{"customdata":[[15,"effektiver",15],[15,"effektiver",15],[15,"effektiver",15],[15,"effektiver",15],[15,"effektiver",15]],"hovertemplate":"\u003cb\u003eFixierung: 15 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 15 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_15_laufzeit_15","line":{"color":"#d62728","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"15J fix - 15J EffZ","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"K4cW2c73E0DD9Shcj8ISQM3MzMzMzBRAke18PzVeFEBEi2zn+ykTQA=="},"type":"scatter"},{"customdata":[[20,"zinssatz",0],[20,"zinssatz",0],[20,"zinssatz",0],[20,"zinssatz",0],[20,"zinssatz",0]],"hovertemplate":"\u003cb\u003eFixierung: 0 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 20 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_0_laufzeit_20","line":{"color":"#1f77b4","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"0J fix - 20J ZinsS","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"uB6F61G4BECHFtnO91MFQE5iEFg5tANAQmDl0CLbBEAfhetRuB4CQA=="},"type":"scatter"},{"customdata":[[20,"effektiver",0],[20,"effektiver",0],[20,"effektiver",0],[20,"effektiver",0],[20,"effektiver",0]],"hovertemplate":"\u003cb\u003eFixierung: 0 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 20 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_0_laufzeit_20","line":{"color":"#1f77b4","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"0J fix - 20J EffZ","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"UrgehetRBkAhsHJoke0GQOf7qfHSTQVA2\u002fl+arx0BkC4HoXrUbgDQA=="},"type":"scatter"},{"customdata":[[20,"zinssatz",5],[20,"zinssatz",5],[20,"zinssatz",5],[20,"zinssatz",5],[20,"zinssatz",5]],"hovertemplate":"\u003cb\u003eFixierung: 5 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 20 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_5_laufzeit_20","line":{"color":"#2ca02c","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"5J fix - 20J ZinsS","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"aJHtfD81CkBqvHSTGAQLQMdLN4lBYAhAkxgEVg4tDED+1HjpJjEIQA=="},"type":"scatter"},{"customdata":[[20,"effektiver",5],[20,"effektiver",5],[20,"effektiver",5],[20,"effektiver",5],[20,"effektiver",5]],"hovertemplate":"\u003cb\u003eFixierung: 5 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 20 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_5_laufzeit_20","line":{"color":"#2ca02c","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"5J fix - 20J EffZ","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"AiuHFtnOC0AEVg4tsp0MQGDl0CLb+QlALbKd76fGDUCYbhKDwMoJQA=="},"type":"scatter"},{"customdata":[[20,"zinssatz",10],[20,"zinssatz",10],[20,"zinssatz",10],[20,"zinssatz",10],[20,"zinssatz",10]],"hovertemplate":"\u003cb\u003eFixierung: 10 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 20 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_10_laufzeit_20","line":{"color":"#ff7f0e","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"10J fix - 20J ZinsS","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"x0s3iUFgEEAbL90kBgEQQAisHFpkOw9Ay6FFtvN9EEDpJjEIrJwQQA=="},"type":"scatter"},{"customdata":[[20,"effektiver",10],[20,"effektiver",10],[20,"effektiver",10],[20,"effektiver",10],[20,"effektiver",10]],"hovertemplate":"\u003cb\u003eFixierung: 10 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 20 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_10_laufzeit_20","line":{"color":"#ff7f0e","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"10J fix - 20J EffZ","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"kxgEVg4tEUDn+6nx0s0QQNEi2\u002fl+ahBAmG4Sg8BKEUC28\u002f3UeGkRQA=="},"type":"scatter"},{"customdata":[[20,"zinssatz",15],[20,"zinssatz",15],[20,"zinssatz",15],[20,"zinssatz",15],[20,"zinssatz",15]],"hovertemplate":"\u003cb\u003eFixierung: 15 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 20 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_15_laufzeit_20","line":{"color":"#d62728","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"15J fix - 20J ZinsS","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"K4cW2c73EkACK4cW2c4RQPLSTWIQWBNABoGVQ4vsE0CBlUOLbGcTQA=="},"type":"scatter"},{"customdata":[[20,"effektiver",15],[20,"effektiver",15],[20,"effektiver",15],[20,"effektiver",15],[20,"effektiver",15]],"hovertemplate":"\u003cb\u003eFixierung: 15 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 20 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_15_laufzeit_20","line":{"color":"#d62728","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"15J fix - 20J EffZ","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"+FPjpZvEE0DP91PjpZsSQL6fGi\u002fdJBRA001iEFi5FEBOYhBYOTQUQA=="},"type":"scatter"},{"customdata":[[20,"zinssatz",20],[20,"zinssatz",20],[20,"zinssatz",20],[20,"zinssatz",20],[20,"zinssatz",20]],"hovertemplate":"\u003cb\u003eFixierung: 20 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 20 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_20_laufzeit_20","line":{"color":"#9467bd","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"20J fix - 20J ZinsS","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"DAIrhxZZFkBaZDvfT40VQL6fGi\u002fdJBdAzczMzMxMFkCwcmiR7XwWQA=="},"type":"scatter"},{"customdata":[[20,"effektiver",20],[20,"effektiver",20],[20,"effektiver",20],[20,"effektiver",20],[20,"effektiver",20]],"hovertemplate":"\u003cb\u003eFixierung: 20 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 20 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_20_laufzeit_20","line":{"color":"#9467bd","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"20J fix - 20J EffZ","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"2c73U+MlF0AnMQisHFoWQIts5\u002fup8RdAmpmZmZkZF0B9PzVeukkXQA=="},"type":"scatter"},{"customdata":[[25,"zinssatz",0],[25,"zinssatz",0],[25,"zinssatz",0],[25,"zinssatz",0],[25,"zinssatz",0],[25,"zinssatz",0]],"hovertemplate":"\u003cb\u003eFixierung: 0 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 25 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_0_laufzeit_25","line":{"color":"#1f77b4","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"0J fix - 25J ZinsS","visible":true,"x":["2025-10-07T18:02:16.000635000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"9ihcj8L1CEBWDi2yne8DQKAaL90kBgRAWDm0yHa+AkAhsHJoke0CQM3MzMzMzAVA"},"type":"scatter"},{"customdata":[[25,"effektiver",0],[25,"effektiver",0],[25,"effektiver",0],[25,"effektiver",0],[25,"effektiver",0],[25,"effektiver",0]],"hovertemplate":"\u003cb\u003eFixierung: 0 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 25 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_0_laufzeit_25","line":{"color":"#1f77b4","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"0J fix - 25J EffZ","visible":true,"x":["2025-10-07T18:02:16.000635000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"IbByaJHtCkDwp8ZLN4kFQDm0yHa+nwVA8tJNYhBYBEC6SQwCK4cEQGZmZmZmZgdA"},"type":"scatter"},{"customdata":[[25,"zinssatz",5],[25,"zinssatz",5],[25,"zinssatz",5],[25,"zinssatz",5],[25,"zinssatz",5],[25,"zinssatz",5]],"hovertemplate":"\u003cb\u003eFixierung: 5 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 25 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_5_laufzeit_25","line":{"color":"#2ca02c","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"5J fix - 25J ZinsS","visible":true,"x":["2025-10-07T18:02:16.000635000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"H4XrUbgeCUCWQ4ts5\u002fsIQBSuR+F6FAxAhxbZzvdTDECR7Xw\u002fNV4IQARWDi2ynQpA"},"type":"scatter"},{"customdata":[[25,"effektiver",5],[25,"effektiver",5],[25,"effektiver",5],[25,"effektiver",5],[25,"effektiver",5],[25,"effektiver",5]],"hovertemplate":"\u003cb\u003eFixierung: 5 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 25 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_5_laufzeit_25","line":{"color":"#2ca02c","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"5J fix - 25J EffZ","visible":true,"x":["2025-10-07T18:02:16.000635000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"SgwCK4cWC0Av3SQGgZUKQK5H4XoUrg1AIbByaJHtDUArhxbZzvcJQJ7vp8ZLNwxA"},"type":"scatter"},{"customdata":[[25,"zinssatz",10],[25,"zinssatz",10],[25,"zinssatz",10],[25,"zinssatz",10],[25,"zinssatz",10]],"hovertemplate":"\u003cb\u003eFixierung: 10 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 25 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_10_laufzeit_25","line":{"color":"#ff7f0e","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"10J fix - 25J ZinsS","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"okW28\u002f3UD0C0yHa+nxoRQIPAyqFFNhBACtejcD0KDkDP91PjpZsPQA=="},"type":"scatter"},{"customdata":[[25,"effektiver",10],[25,"effektiver",10],[25,"effektiver",10],[25,"effektiver",10],[25,"effektiver",10]],"hovertemplate":"\u003cb\u003eFixierung: 10 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 25 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_10_laufzeit_25","line":{"color":"#ff7f0e","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"10J fix - 25J EffZ","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"nu+nxku3EECBlUOLbOcRQFCNl24SAxFApHA9CtejD0C0yHa+n5oQQA=="},"type":"scatter"},{"customdata":[[25,"zinssatz",15],[25,"zinssatz",15],[25,"zinssatz",15],[25,"zinssatz",15],[25,"zinssatz",15]],"hovertemplate":"\u003cb\u003eFixierung: 15 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 25 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_15_laufzeit_25","line":{"color":"#d62728","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"15J fix - 25J ZinsS","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"fT81XrpJE0DpJjEIrJwTQESLbOf7KRRAEoPAyqFFEkAZBFYOLTISQA=="},"type":"scatter"},{"customdata":[[25,"effektiver",15],[25,"effektiver",15],[25,"effektiver",15],[25,"effektiver",15],[25,"effektiver",15]],"hovertemplate":"\u003cb\u003eFixierung: 15 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 25 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_15_laufzeit_25","line":{"color":"#d62728","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"15J fix - 25J EffZ","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"SgwCK4cWFEC28\u002f3UeGkUQBBYObTI9hRA30+Nl24SE0Dl0CLb+f4SQA=="},"type":"scatter"},{"customdata":[[25,"zinssatz",20],[25,"zinssatz",20],[25,"zinssatz",20],[25,"zinssatz",20],[25,"zinssatz",20]],"hovertemplate":"\u003cb\u003eFixierung: 20 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 25 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_20_laufzeit_25","line":{"color":"#9467bd","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"20J fix - 25J ZinsS","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"30+Nl24SFkD+1HjpJjEWQPp+arx0ExdAc2iR7Xw\u002fFUCkcD0K16MVQA=="},"type":"scatter"},{"customdata":[[25,"effektiver",20],[25,"effektiver",20],[25,"effektiver",20],[25,"effektiver",20],[25,"effektiver",20]],"hovertemplate":"\u003cb\u003eFixierung: 20 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 25 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_20_laufzeit_25","line":{"color":"#9467bd","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"20J fix - 25J EffZ","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"rBxaZDvfFkDLoUW28\u002f0WQMdLN4lB4BdAPzVeukkMFkBxPQrXo3AWQA=="},"type":"scatter"},{"customdata":[[25,"zinssatz",25],[25,"zinssatz",25],[25,"zinssatz",25],[25,"zinssatz",25],[25,"zinssatz",25]],"hovertemplate":"\u003cb\u003eFixierung: 25 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 25 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_25_laufzeit_25","line":{"color":"#8c564b","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"25J fix - 25J ZinsS","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"IbByaJFtGEBcj8L1KFwYQIXrUbgeBRpAw\u002fUoXI\u002fCGEAxCKwcWuQXQA=="},"type":"scatter"},{"customdata":[[25,"effektiver",25],[25,"effektiver",25],[25,"effektiver",25],[25,"effektiver",25],[25,"effektiver",25]],"hovertemplate":"\u003cb\u003eFixierung: 25 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 25 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_25_laufzeit_25","line":{"color":"#8c564b","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"25J fix - 25J EffZ","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"7nw\u002fNV46GUApXI\u002fC9SgZQFK4HoXr0RpAj8L1KFyPGUD+1HjpJrEYQA=="},"type":"scatter"},{"customdata":[[30,"zinssatz",0],[30,"zinssatz",0],[30,"zinssatz",0],[30,"zinssatz",0],[30,"zinssatz",0],[30,"zinssatz",0],[30,"zinssatz",0],[30,"zinssatz",0]],"hovertemplate":"\u003cb\u003eFixierung: 0 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 30 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_0_laufzeit_30","line":{"color":"#1f77b4","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"0J fix - 30J ZinsS","visible":true,"x":["2025-10-07T18:02:16.000622000","2025-10-07T18:17:09.892650000","2025-10-08T13:40:44.310014000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"KVyPwvUoCEApXI\u002fC9SgIQClcj8L1KAhABoGVQ4tsAkDy0k1iEFgDQIlBYOXQIgNAObTIdr6fBUCNl24Sg8AFQA=="},"type":"scatter"},{"customdata":[[30,"effektiver",0],[30,"effektiver",0],[30,"effektiver",0],[30,"effektiver",0],[30,"effektiver",0],[30,"effektiver",0],[30,"effektiver",0],[30,"effektiver",0]],"hovertemplate":"\u003cb\u003eFixierung: 0 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 30 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_0_laufzeit_30","line":{"color":"#1f77b4","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"0J fix - 30J EffZ","visible":true,"x":["2025-10-07T18:02:16.000622000","2025-10-07T18:17:09.892650000","2025-10-08T13:40:44.310014000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"7FG4HoXrCUBYObTIdr4JQFg5tMh2vglAoBov3SQGBECLbOf7qfEEQCPb+X5qvARA001iEFg5B0AnMQisHFoHQA=="},"type":"scatter"},{"customdata":[[30,"zinssatz",5],[30,"zinssatz",5],[30,"zinssatz",5],[30,"zinssatz",5],[30,"zinssatz",5],[30,"zinssatz",5],[30,"zinssatz",5],[30,"zinssatz",5]],"hovertemplate":"\u003cb\u003eFixierung: 5 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 30 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_5_laufzeit_30","line":{"color":"#2ca02c","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"5J fix - 30J ZinsS","visible":true,"x":["2025-10-07T18:02:16.000622000","2025-10-07T18:17:09.892650000","2025-10-08T13:40:44.310014000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"UrgehetRCEBSuB6F61EIQFK4HoXrUQhA4XoUrkfhCEBYObTIdr4IQEJg5dAi2whAXrpJDAIrCECgGi\u002fdJAYLQA=="},"type":"scatter"},{"customdata":[[30,"effektiver",5],[30,"effektiver",5],[30,"effektiver",5],[30,"effektiver",5],[30,"effektiver",5],[30,"effektiver",5],[30,"effektiver",5],[30,"effektiver",5]],"hovertemplate":"\u003cb\u003eFixierung: 5 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 30 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_5_laufzeit_30","line":{"color":"#2ca02c","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"5J fix - 30J EffZ","visible":true,"x":["2025-10-07T18:02:16.000622000","2025-10-07T18:17:09.892650000","2025-10-08T13:40:44.310014000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"FK5H4XoUCkC28\u002f3UeOkJQLbz\u002fdR46QlAexSuR+F6CkDy0k1iEFgKQNv5fmq8dApA+FPjpZvECUA5tMh2vp8MQA=="},"type":"scatter"},{"customdata":[[30,"zinssatz",10],[30,"zinssatz",10],[30,"zinssatz",10],[30,"zinssatz",10],[30,"zinssatz",10],[30,"zinssatz",10],[30,"zinssatz",10],[30,"zinssatz",10]],"hovertemplate":"\u003cb\u003eFixierung: 10 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 30 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_10_laufzeit_30","line":{"color":"#ff7f0e","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"10J fix - 30J ZinsS","visible":true,"x":["2025-10-07T18:02:16.000622000","2025-10-07T18:17:09.892650000","2025-10-08T13:40:44.310014000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"ZmZmZmZmCkBmZmZmZmYKQGZmZmZmZgpAnMQgsHLoEEDpJjEIrBwRQJ7vp8ZLNw5AmpmZmZmZD0BOYhBYObQNQA=="},"type":"scatter"},{"customdata":[[30,"effektiver",10],[30,"effektiver",10],[30,"effektiver",10],[30,"effektiver",10],[30,"effektiver",10],[30,"effektiver",10],[30,"effektiver",10],[30,"effektiver",10]],"hovertemplate":"\u003cb\u003eFixierung: 10 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 30 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_10_laufzeit_30","line":{"color":"#ff7f0e","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"10J fix - 30J EffZ","visible":true,"x":["2025-10-07T18:02:16.000622000","2025-10-07T18:17:09.892650000","2025-10-08T13:40:44.310014000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"MzMzMzMzDEDVeOkmMQgMQNV46SYxCAxAaJHtfD+1EUC28\u002f3UeOkRQDeJQWDl0A9AmpmZmZmZEEDn+6nx0k0PQA=="},"type":"scatter"},{"customdata":[[30,"zinssatz",15],[30,"zinssatz",15],[30,"zinssatz",15],[30,"zinssatz",15],[30,"zinssatz",15],[30,"zinssatz",15],[30,"zinssatz",15],[30,"zinssatz",15]],"hovertemplate":"\u003cb\u003eFixierung: 15 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 30 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_15_laufzeit_30","line":{"color":"#d62728","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"15J fix - 30J ZinsS","visible":true,"x":["2025-10-07T18:02:16.000622000","2025-10-07T18:17:09.892650000","2025-10-08T13:40:44.310014000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"zczMzMzMDEDNzMzMzMwMQM3MzMzMzAxAiUFg5dCiEkD8qfHSTWITQD81XrpJjBJAqvHSTWIQFEDsUbgehWsSQA=="},"type":"scatter"},{"customdata":[[30,"effektiver",15],[30,"effektiver",15],[30,"effektiver",15],[30,"effektiver",15],[30,"effektiver",15],[30,"effektiver",15],[30,"effektiver",15],[30,"effektiver",15]],"hovertemplate":"\u003cb\u003eFixierung: 15 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 30 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_15_laufzeit_30","line":{"color":"#d62728","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"15J fix - 30J EffZ","visible":true,"x":["2025-10-07T18:02:16.000622000","2025-10-07T18:17:09.892650000","2025-10-08T13:40:44.310014000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"2c73U+OlDkBGtvP91HgOQEa28\u002f3UeA5AVg4tsp1vE0DJdr6fGi8UQAwCK4cWWRNAd76fGi\u002fdFEC4HoXrUTgTQA=="},"type":"scatter"},{"customdata":[[30,"zinssatz",20],[30,"zinssatz",20],[30,"zinssatz",20],[30,"zinssatz",20],[30,"zinssatz",20],[30,"zinssatz",20],[30,"zinssatz",20],[30,"zinssatz",20]],"hovertemplate":"\u003cb\u003eFixierung: 20 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 30 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_20_laufzeit_30","line":{"color":"#9467bd","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"20J fix - 30J ZinsS","visible":true,"x":["2025-10-07T18:02:16.000622000","2025-10-07T18:17:09.892650000","2025-10-08T13:40:44.310014000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"MzMzMzMzDUAzMzMzMzMNQDMzMzMzMw1A7nw\u002fNV46FUCPwvUoXA8VQJ7vp8ZLNxZABoGVQ4tsFkB9PzVeuskWQA=="},"type":"scatter"},{"customdata":[[30,"effektiver",20],[30,"effektiver",20],[30,"effektiver",20],[30,"effektiver",20],[30,"effektiver",20],[30,"effektiver",20],[30,"effektiver",20],[30,"effektiver",20]],"hovertemplate":"\u003cb\u003eFixierung: 20 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 30 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_20_laufzeit_30","line":{"color":"#9467bd","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"20J fix - 30J EffZ","visible":true,"x":["2025-10-07T18:02:16.000622000","2025-10-07T18:17:09.892650000","2025-10-08T13:40:44.310014000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"dZMYBFYOD0DhehSuR+EOQOF6FK5H4Q5AukkMAisHFkBcj8L1KNwVQGq8dJMYBBdA001iEFg5F0BKDAIrh5YXQA=="},"type":"scatter"},{"customdata":[[30,"zinssatz",25],[30,"zinssatz",25],[30,"zinssatz",25],[30,"zinssatz",25],[30,"zinssatz",25],[30,"zinssatz",25],[30,"zinssatz",25]],"hovertemplate":"\u003cb\u003eFixierung: 25 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 30 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_25_laufzeit_30","line":{"color":"#8c564b","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"25J fix - 30J ZinsS","visible":true,"x":["2025-10-07T18:17:09.892650000","2025-10-08T13:40:44.310014000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"w\u002fUoXI\u002fCDUDD9Shcj8INQFTjpZvEIBpAc2iR7Xw\u002fGECWQ4ts5\u002fsYQFTjpZvEoBhAaJHtfD81GEA="},"type":"scatter"},{"customdata":[[30,"effektiver",25],[30,"effektiver",25],[30,"effektiver",25],[30,"effektiver",25],[30,"effektiver",25],[30,"effektiver",25],[30,"effektiver",25]],"hovertemplate":"\u003cb\u003eFixierung: 25 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 30 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_25_laufzeit_30","line":{"color":"#8c564b","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"25J fix - 30J EffZ","visible":true,"x":["2025-10-07T18:17:09.892650000","2025-10-08T13:40:44.310014000","2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"f2q8dJMYEEB\u002farx0kxgQQCGwcmiR7RpAPzVeukkMGUBiEFg5tMgZQCGwcmiRbRlANV66SQwCGUA="},"type":"scatter"},{"customdata":[[30,"zinssatz",30],[30,"zinssatz",30],[30,"zinssatz",30],[30,"zinssatz",30],[30,"zinssatz",30]],"hovertemplate":"\u003cb\u003eFixierung: 30 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 30 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eZinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_30_laufzeit_30","line":{"color":"#e377c2","dash":"solid","width":2.5},"marker":{"size":8,"symbol":"circle"},"mode":"lines+markers","name":"30J fix - 30J ZinsS","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"Vg4tsp3vG0C+nxov3SQdQESLbOf7qRxAZDvfT40XG0ACK4cW2U4cQA=="},"type":"scatter"},{"customdata":[[30,"effektiver",30],[30,"effektiver",30],[30,"effektiver",30],[30,"effektiver",30],[30,"effektiver",30]],"hovertemplate":"\u003cb\u003eFixierung: 30 Jahre\u003c\u002fb\u003e\u003cbr\u003eLaufzeit: 30 Jahre\u003cbr\u003eDatum: %{x|%d.%m.%Y}\u003cbr\u003eEff. Zinssatz: %{y:.3f}%\u003cbr\u003e\u003cextra\u003e\u003c\u002fextra\u003e","legendgroup":"fixierung_30_laufzeit_30","line":{"color":"#e377c2","dash":"dash","width":2.5},"marker":{"size":7,"symbol":"square"},"mode":"lines+markers","name":"30J fix - 30J EffZ","visible":true,"x":["2025-10-15T14:15:12.461883000","2025-10-22T14:15:12.461883000","2025-10-29T14:15:12.461883000","2025-11-05T14:15:12.461883000","2025-11-12T14:15:12.461883000"],"y":{"dtype":"f8","bdata":"I9v5fmq8HECLbOf7qfEdQBBYObTIdh1AMQisHFrkG0DP91PjpRsdQA=="},"type":"scatter"}],                        {"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermapbox":[{"type":"scattermapbox","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05},"mapbox":{"style":"light"}}},"title":{"font":{"size":20,"family":"Segoe UI, Arial"},"text":"\ud83c\udfe0 Immobilienkredit Zinsentwicklung - Interaktive Analyse","x":0.5,"xanchor":"center"},"xaxis":{"title":{"font":{"size":14,"family":"Segoe UI, Arial"},"text":"Datum"},"showgrid":true,"gridwidth":1,"gridcolor":"rgba(200,200,200,0.3)","tickformat":"%d.%m.%Y"},"yaxis":{"title":{"font":{"size":14,"family":"Segoe UI, Arial"},"text":"Zinssatz (%)"},"showgrid":true,"gridwidth":1,"gridcolor":"rgba(200,200,200,0.3)"},"font":{"family":"Segoe UI, Arial","size":12},"legend":{"font":{"size":10},"orientation":"v","yanchor":"top","y":1,"xanchor":"left","x":1.02,"bgcolor":"rgba(255,255,255,0.8)","bordercolor":"rgba(0,0,0,0.2)","borderwidth":1},"margin":{"l":80,"r":280,"t":80,"b":80},"hovermode":"closest","plot_bgcolor":"rgba(250,250,250,0.9)","paper_bgcolor":"white","height":600},                        {"displayModeBar": true, "displaylogo": false, "modeBarButtonsToRemove": ["select2d", "lasso2d"], "toImageButtonOptions": {"format": "png", "filename": "housing_loan_chart", "height": 800, "width": 1400, "scale": 2}, "responsive": true}                    )                };            </script>        </div>
+</body>
+</html>
+            
+            <script>
+                // Store trace metadata
+                const traceMetadata = [{'laufzeit': 15, 'type': 'zinssatz', 'fixierung': 0}, {'laufzeit': 15, 'type': 'effektiver', 'fixierung': 0}, {'laufzeit': 15, 'type': 'zinssatz', 'fixierung': 5}, {'laufzeit': 15, 'type': 'effektiver', 'fixierung': 5}, {'laufzeit': 15, 'type': 'zinssatz', 'fixierung': 10}, {'laufzeit': 15, 'type': 'effektiver', 'fixierung': 10}, {'laufzeit': 15, 'type': 'zinssatz', 'fixierung': 15}, {'laufzeit': 15, 'type': 'effektiver', 'fixierung': 15}, {'laufzeit': 20, 'type': 'zinssatz', 'fixierung': 0}, {'laufzeit': 20, 'type': 'effektiver', 'fixierung': 0}, {'laufzeit': 20, 'type': 'zinssatz', 'fixierung': 5}, {'laufzeit': 20, 'type': 'effektiver', 'fixierung': 5}, {'laufzeit': 20, 'type': 'zinssatz', 'fixierung': 10}, {'laufzeit': 20, 'type': 'effektiver', 'fixierung': 10}, {'laufzeit': 20, 'type': 'zinssatz', 'fixierung': 15}, {'laufzeit': 20, 'type': 'effektiver', 'fixierung': 15}, {'laufzeit': 20, 'type': 'zinssatz', 'fixierung': 20}, {'laufzeit': 20, 'type': 'effektiver', 'fixierung': 20}, {'laufzeit': 25, 'type': 'zinssatz', 'fixierung': 0}, {'laufzeit': 25, 'type': 'effektiver', 'fixierung': 0}, {'laufzeit': 25, 'type': 'zinssatz', 'fixierung': 5}, {'laufzeit': 25, 'type': 'effektiver', 'fixierung': 5}, {'laufzeit': 25, 'type': 'zinssatz', 'fixierung': 10}, {'laufzeit': 25, 'type': 'effektiver', 'fixierung': 10}, {'laufzeit': 25, 'type': 'zinssatz', 'fixierung': 15}, {'laufzeit': 25, 'type': 'effektiver', 'fixierung': 15}, {'laufzeit': 25, 'type': 'zinssatz', 'fixierung': 20}, {'laufzeit': 25, 'type': 'effektiver', 'fixierung': 20}, {'laufzeit': 25, 'type': 'zinssatz', 'fixierung': 25}, {'laufzeit': 25, 'type': 'effektiver', 'fixierung': 25}, {'laufzeit': 30, 'type': 'zinssatz', 'fixierung': 0}, {'laufzeit': 30, 'type': 'effektiver', 'fixierung': 0}, {'laufzeit': 30, 'type': 'zinssatz', 'fixierung': 5}, {'laufzeit': 30, 'type': 'effektiver', 'fixierung': 5}, {'laufzeit': 30, 'type': 'zinssatz', 'fixierung': 10}, {'laufzeit': 30, 'type': 'effektiver', 'fixierung': 10}, {'laufzeit': 30, 'type': 'zinssatz', 'fixierung': 15}, {'laufzeit': 30, 'type': 'effektiver', 'fixierung': 15}, {'laufzeit': 30, 'type': 'zinssatz', 'fixierung': 20}, {'laufzeit': 30, 'type': 'effektiver', 'fixierung': 20}, {'laufzeit': 30, 'type': 'zinssatz', 'fixierung': 25}, {'laufzeit': 30, 'type': 'effektiver', 'fixierung': 25}, {'laufzeit': 30, 'type': 'zinssatz', 'fixierung': 30}, {'laufzeit': 30, 'type': 'effektiver', 'fixierung': 30}];
+                
+                // Store table data for each Laufzeit
+                const tableData = {15: {'run': {'id': 25, 'scrape_date': '2025-11-12 14:15:12.461883', 'kreditbetrag': 500000, 'laufzeit_jahre': 15, 'kaufpreis': 500000, 'kaufnebenkosten': 50000, 'eigenmittel': 150000, 'haushalt_alter': 45, 'haushalt_einkommen': 5200, 'haushalt_nutzflaeche': 100, 'haushalt_kreditraten': 300, 'notes': 'Dummy data - Week 5 - Laufzeit 15 Jahre'}, 'variations': [{'id': 133, 'run_id': 25, 'fixierung_jahre': 0, 'rate': 1789, 'zinssatz': '2.373 % p.a. variabel (15 Jahre)', 'laufzeit': '15 Jahre', 'anschlusskondition': '', 'effektiver_zinssatz': '2.573 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 322020, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.857208'}, {'id': 134, 'run_id': 25, 'fixierung_jahre': 5, 'rate': 1918, 'zinssatz': '3.276 % p.a. fix (5 Jahre)', 'laufzeit': '15 Jahre', 'anschlusskondition': '3.776 % p.a. variabel', 'effektiver_zinssatz': '3.476 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 345240, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.859580'}, {'id': 135, 'run_id': 25, 'fixierung_jahre': 10, 'rate': 1984, 'zinssatz': '4.237 % p.a. fix (10 Jahre)', 'laufzeit': '15 Jahre', 'anschlusskondition': '4.737 % p.a. variabel', 'effektiver_zinssatz': '4.437 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 357120, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.861996'}, {'id': 136, 'run_id': 25, 'fixierung_jahre': 15, 'rate': 2113, 'zinssatz': '4.591 % p.a. fix (15 Jahre)', 'laufzeit': '15 Jahre', 'anschlusskondition': '5.091 % p.a. variabel', 'effektiver_zinssatz': '4.791 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 380340, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.864354'}]}, 20: {'run': {'id': 20, 'scrape_date': '2025-11-12 14:15:12.461883', 'kreditbetrag': 500000, 'laufzeit_jahre': 20, 'kaufpreis': 500000, 'kaufnebenkosten': 50000, 'eigenmittel': 150000, 'haushalt_alter': 45, 'haushalt_einkommen': 5200, 'haushalt_nutzflaeche': 100, 'haushalt_kreditraten': 300, 'notes': 'Dummy data - Week 5 - Laufzeit 20 Jahre'}, 'variations': [{'id': 112, 'run_id': 20, 'fixierung_jahre': 0, 'rate': 1828, 'zinssatz': '2.265 % p.a. variabel (20 Jahre)', 'laufzeit': '20 Jahre', 'anschlusskondition': '', 'effektiver_zinssatz': '2.465 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 438720, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.777254'}, {'id': 113, 'run_id': 20, 'fixierung_jahre': 5, 'rate': 1909, 'zinssatz': '3.024 % p.a. fix (5 Jahre)', 'laufzeit': '20 Jahre', 'anschlusskondition': '3.524 % p.a. variabel', 'effektiver_zinssatz': '3.224 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 458160, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.780274'}, {'id': 114, 'run_id': 20, 'fixierung_jahre': 10, 'rate': 1974, 'zinssatz': '4.153 % p.a. fix (10 Jahre)', 'laufzeit': '20 Jahre', 'anschlusskondition': '4.653 % p.a. variabel', 'effektiver_zinssatz': '4.353 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 473760, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.783691'}, {'id': 115, 'run_id': 20, 'fixierung_jahre': 15, 'rate': 2136, 'zinssatz': '4.851 % p.a. fix (15 Jahre)', 'laufzeit': '20 Jahre', 'anschlusskondition': '5.351 % p.a. variabel', 'effektiver_zinssatz': '5.051 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 512640, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.786632'}, {'id': 116, 'run_id': 20, 'fixierung_jahre': 20, 'rate': 2176, 'zinssatz': '5.622 % p.a. fix (20 Jahre)', 'laufzeit': '20 Jahre', 'anschlusskondition': '6.122 % p.a. variabel', 'effektiver_zinssatz': '5.822 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 522240, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.789696'}]}, 25: {'run': {'id': 15, 'scrape_date': '2025-11-12 14:15:12.461883', 'kreditbetrag': 500000, 'laufzeit_jahre': 25, 'kaufpreis': 500000, 'kaufnebenkosten': 50000, 'eigenmittel': 150000, 'haushalt_alter': 45, 'haushalt_einkommen': 5200, 'haushalt_nutzflaeche': 100, 'haushalt_kreditraten': 300, 'notes': 'Dummy data - Week 5 - Laufzeit 25 Jahre'}, 'variations': [{'id': 86, 'run_id': 15, 'fixierung_jahre': 0, 'rate': 1756, 'zinssatz': '2.725 % p.a. variabel (25 Jahre)', 'laufzeit': '25 Jahre', 'anschlusskondition': '', 'effektiver_zinssatz': '2.925 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 526800, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.676966'}, {'id': 87, 'run_id': 15, 'fixierung_jahre': 5, 'rate': 1950, 'zinssatz': '3.327 % p.a. fix (5 Jahre)', 'laufzeit': '25 Jahre', 'anschlusskondition': '3.827 % p.a. variabel', 'effektiver_zinssatz': '3.527 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 585000, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.679618'}, {'id': 88, 'run_id': 15, 'fixierung_jahre': 10, 'rate': 1977, 'zinssatz': '3.951 % p.a. fix (10 Jahre)', 'laufzeit': '25 Jahre', 'anschlusskondition': '4.451 % p.a. variabel', 'effektiver_zinssatz': '4.151 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 593100, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.682859'}, {'id': 89, 'run_id': 15, 'fixierung_jahre': 15, 'rate': 2124, 'zinssatz': '4.549 % p.a. fix (15 Jahre)', 'laufzeit': '25 Jahre', 'anschlusskondition': '5.049 % p.a. variabel', 'effektiver_zinssatz': '4.749 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 637200, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.685610'}, {'id': 90, 'run_id': 15, 'fixierung_jahre': 20, 'rate': 2168, 'zinssatz': '5.410 % p.a. fix (20 Jahre)', 'laufzeit': '25 Jahre', 'anschlusskondition': '5.910 % p.a. variabel', 'effektiver_zinssatz': '5.610 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 650400, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.688500'}, {'id': 91, 'run_id': 15, 'fixierung_jahre': 25, 'rate': 2280, 'zinssatz': '5.973 % p.a. fix (25 Jahre)', 'laufzeit': '25 Jahre', 'anschlusskondition': '6.473 % p.a. variabel', 'effektiver_zinssatz': '6.173 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 684000, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.691381'}]}, 30: {'run': {'id': 10, 'scrape_date': '2025-11-12 14:15:12.461883', 'kreditbetrag': 500000, 'laufzeit_jahre': 30, 'kaufpreis': 500000, 'kaufnebenkosten': 50000, 'eigenmittel': 150000, 'haushalt_alter': 45, 'haushalt_einkommen': 5200, 'haushalt_nutzflaeche': 100, 'haushalt_kreditraten': 300, 'notes': 'Dummy data - Week 5 - Laufzeit 30 Jahre'}, 'variations': [{'id': 55, 'run_id': 10, 'fixierung_jahre': 0, 'rate': 1796, 'zinssatz': '2.719 % p.a. variabel (30 Jahre)', 'laufzeit': '30 Jahre', 'anschlusskondition': '', 'effektiver_zinssatz': '2.919 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 646560, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.571944'}, {'id': 56, 'run_id': 10, 'fixierung_jahre': 5, 'rate': 1911, 'zinssatz': '3.378 % p.a. fix (5 Jahre)', 'laufzeit': '30 Jahre', 'anschlusskondition': '3.878 % p.a. variabel', 'effektiver_zinssatz': '3.578 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 687960, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.574902'}, {'id': 57, 'run_id': 10, 'fixierung_jahre': 10, 'rate': 2049, 'zinssatz': '3.713 % p.a. fix (10 Jahre)', 'laufzeit': '30 Jahre', 'anschlusskondition': '4.213 % p.a. variabel', 'effektiver_zinssatz': '3.913 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 737640, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.577666'}, {'id': 58, 'run_id': 10, 'fixierung_jahre': 15, 'rate': 2125, 'zinssatz': '4.605 % p.a. fix (15 Jahre)', 'laufzeit': '30 Jahre', 'anschlusskondition': '5.105 % p.a. variabel', 'effektiver_zinssatz': '4.805 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 765000, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.580728'}, {'id': 59, 'run_id': 10, 'fixierung_jahre': 20, 'rate': 2213, 'zinssatz': '5.697 % p.a. fix (20 Jahre)', 'laufzeit': '30 Jahre', 'anschlusskondition': '6.197 % p.a. variabel', 'effektiver_zinssatz': '5.897 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 796680, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.584417'}, {'id': 60, 'run_id': 10, 'fixierung_jahre': 25, 'rate': 2265, 'zinssatz': '6.052 % p.a. fix (25 Jahre)', 'laufzeit': '30 Jahre', 'anschlusskondition': '6.552 % p.a. variabel', 'effektiver_zinssatz': '6.252 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 815400, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.587187'}, {'id': 61, 'run_id': 10, 'fixierung_jahre': 30, 'rate': 2448, 'zinssatz': '7.077 % p.a. fix (30 Jahre)', 'laufzeit': '30 Jahre', 'anschlusskondition': '7.577 % p.a. variabel', 'effektiver_zinssatz': '7.277 % p.a.', 'auszahlungsbetrag': 495000, 'einberechnete_kosten': 5000, 'kreditbetrag': 500000, 'gesamtbetrag': 881280, 'besicherung': 'Pfandrecht', 'scrape_timestamp': '2025-10-08 14:15:12.589955'}]}};
+                
+                // Current filter states
+                let currentLaufzeit = 'all';
+                let currentZinssatz = 'beide';
+                
+                // Apply combined filters (chart + tables)
+                function applyFilters() {
+                    // Update chart visibility
+                    const visible = traceMetadata.map(meta => {
+                        // Check Laufzeit filter
+                        const laufzeitMatch = currentLaufzeit === 'all' || meta.laufzeit === parseInt(currentLaufzeit);
+                        
+                        // Check Zinssatz type filter
+                        let zinssatzMatch = true;
+                        if (currentZinssatz === 'zinssatz') {
+                            zinssatzMatch = meta.type === 'zinssatz';
+                        } else if (currentZinssatz === 'effektiver') {
+                            zinssatzMatch = meta.type === 'effektiver';
+                        }
+                        // 'beide' means both are shown, so zinssatzMatch stays true
+                        
+                        // Return true only if BOTH conditions match (AND logic)
+                        return laufzeitMatch && zinssatzMatch;
+                    });
+                    
+                    // Update the Plotly chart
+                    Plotly.restyle('plotly-chart', {'visible': visible});
+                    
+                    // Update tables based on Laufzeit
+                    updateTables();
+                }
+                
+                // Update tables based on current Laufzeit filter
+                function updateTables() {
+                    if (currentLaufzeit === 'all') {
+                        // Show latest overall run (could be any Laufzeit)
+                        const latestLaufzeit = 15;
+                        renderTables(tableData[latestLaufzeit], latestLaufzeit, 'Aktuellste Berechnung (Alle Laufzeiten)');
+                    } else {
+                        // Show latest run for selected Laufzeit
+                        const laufzeit = parseInt(currentLaufzeit);
+                        if (tableData[laufzeit]) {
+                            renderTables(tableData[laufzeit], laufzeit, `Aktuelle Konditionen für ${laufzeit} Jahre Laufzeit`);
+                        }
+                    }
+                }
+                
+                // Render tables with given data
+                function renderTables(data, laufzeit, headerText) {
+                    const run = data.run;
+                    const variations = data.variations;
+                    
+                    // Update run info section
+                    document.querySelector('.run-info h3').textContent = '📊 ' + headerText;
+                    document.querySelectorAll('.info-value')[0].textContent = '€' + run.kreditbetrag.toLocaleString('de-DE');
+                    document.querySelectorAll('.info-value')[1].textContent = run.laufzeit_jahre + ' Jahre';
+                    document.querySelectorAll('.info-value')[2].textContent = '€' + run.kaufpreis.toLocaleString('de-DE');
+                    document.querySelectorAll('.info-value')[3].textContent = '€' + run.kaufnebenkosten.toLocaleString('de-DE');
+                    document.querySelectorAll('.info-value')[4].textContent = '€' + run.eigenmittel.toLocaleString('de-DE');
+                    document.querySelectorAll('.info-value')[5].textContent = run.haushalt_alter + ' Jahre';
+                    document.querySelectorAll('.info-value')[6].textContent = '€' + run.haushalt_einkommen.toFixed(2) + '/Monat';
+                    document.querySelectorAll('.info-value')[7].textContent = run.haushalt_nutzflaeche + ' m²';
+                    
+                    // Build Finanzierungsdetails table
+                    let finanzTable = '';
+                    variations.forEach(v => {
+                        if (v.rate) {
+                            const anschluss = v.anschlusskondition ? 
+                                `<br><small style='color: #7f8c8d;'>Anschluss: ${v.anschlusskondition}</small>` : '';
+                            finanzTable += `
+                                <tr>
+                                    <td class="fixierung-cell">${v.fixierung_jahre}J</td>
+                                    <td class="rate-cell">€${v.rate.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                    <td>${v.zinssatz}${anschluss}</td>
+                                    <td>${v.effektiver_zinssatz}</td>
+                                    <td>${v.laufzeit}</td>
+                                    <td>€${v.kreditbetrag.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                    <td>€${v.gesamtbetrag.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                    <td>${v.besicherung}</td>
+                                </tr>`;
+                        } else {
+                            finanzTable += `
+                                <tr>
+                                    <td class="fixierung-cell">${v.fixierung_jahre}J</td>
+                                    <td colspan="7" style="text-align: center; color: #95a5a6;">Keine Daten verfügbar</td>
+                                </tr>`;
+                        }
+                    });
+                    document.querySelector('#finanz-tbody').innerHTML = finanzTable;
+                    
+                    // Build Kostenübersicht table
+                    const baseline = variations.find(v => v.fixierung_jahre === 0 && v.gesamtbetrag);
+                    const baselineTotal = baseline ? baseline.gesamtbetrag : 0;
+                    
+                    let kostenTable = '';
+                    variations.forEach(v => {
+                        if (v.rate) {
+                            const diff = v.gesamtbetrag - baselineTotal;
+                            const diffClass = Math.abs(diff) > 1000 ? 'highlight' : '';
+                            const diffSign = diff > 0 ? '+' : '';
+                            const diffColor = diff > 0 ? '#e74c3c' : '#27ae60';
+                            
+                            kostenTable += `
+                                <tr class="${diffClass}">
+                                    <td class="fixierung-cell">${v.fixierung_jahre}J</td>
+                                    <td>€${v.auszahlungsbetrag.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                    <td>€${v.einberechnete_kosten.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                    <td>€${v.kreditbetrag.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                    <td style="font-weight: bold;">€${v.gesamtbetrag.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                    <td style="color: ${diffColor};">${diffSign}€${diff.toLocaleString('de-DE', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                </tr>`;
+                        }
+                    });
+                    document.querySelector('#kosten-tbody').innerHTML = kostenTable;
+                    
+                    // Update timestamp with run ID
+                    const timestampDiv = document.querySelector('.timestamp');
+                    const currentTime = timestampDiv.innerHTML.split('<br>')[0];
+                    timestampDiv.innerHTML = currentTime + '<br>Data Source: Housing Loan Database | Run ID: ' + run.id + 
+                        '<br><small>💡 Tip: Filters work together - selecting "20 Jahre" + "Nur Eff. Zinssatz" shows ONLY Effektiver Zinssatz for 20 Jahre Laufzeit</small>';
+                }
+                
+                // Laufzeit dropdown change handler
+                document.getElementById('laufzeit-filter').addEventListener('change', function(e) {
+                    currentLaufzeit = e.target.value;
+                    applyFilters();
+                });
+                
+                // Zinssatz button click handler
+                function setZinssatzFilter(type) {
+                    currentZinssatz = type;
+                    
+                    // Update button styling
+                    document.getElementById('btn-beide').classList.remove('active');
+                    document.getElementById('btn-zinssatz').classList.remove('active');
+                    document.getElementById('btn-effektiver').classList.remove('active');
+                    document.getElementById('btn-' + type).classList.add('active');
+                    
+                    applyFilters();
+                }
+            </script>
+        </div>
+        
+        <div class="table-container">
+            <h2 style="color: #2c3e50; margin-bottom: 20px;">📋 Finanzierungsdetails - Aktuellste Konditionen</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Fixierung</th>
+                        <th>Monatliche Rate</th>
+                        <th>Zinssatz</th>
+                        <th>Effektiver Zinssatz</th>
+                        <th>Laufzeit</th>
+                        <th>Kreditbetrag</th>
+                        <th>Gesamtbetrag</th>
+                        <th>Besicherung</th>
+                    </tr>
+                </thead>
+                <tbody id="finanz-tbody">
+
+                    <tr>
+                        <td class="fixierung-cell">0J</td>
+                        <td class="rate-cell">€1,789.00</td>
+                        <td>2.373 % p.a. variabel (15 Jahre)</td>
+                        <td>2.573 % p.a.</td>
+                        <td>15 Jahre</td>
+                        <td>€500,000.00</td>
+                        <td>€322,020.00</td>
+                        <td>Pfandrecht</td>
+                    </tr>
+
+                    <tr>
+                        <td class="fixierung-cell">5J</td>
+                        <td class="rate-cell">€1,918.00</td>
+                        <td>3.276 % p.a. fix (5 Jahre)<br><small style='color: #7f8c8d;'>Anschluss: 3.776 % p.a. variabel</small></td>
+                        <td>3.476 % p.a.</td>
+                        <td>15 Jahre</td>
+                        <td>€500,000.00</td>
+                        <td>€345,240.00</td>
+                        <td>Pfandrecht</td>
+                    </tr>
+
+                    <tr>
+                        <td class="fixierung-cell">10J</td>
+                        <td class="rate-cell">€1,984.00</td>
+                        <td>4.237 % p.a. fix (10 Jahre)<br><small style='color: #7f8c8d;'>Anschluss: 4.737 % p.a. variabel</small></td>
+                        <td>4.437 % p.a.</td>
+                        <td>15 Jahre</td>
+                        <td>€500,000.00</td>
+                        <td>€357,120.00</td>
+                        <td>Pfandrecht</td>
+                    </tr>
+
+                    <tr>
+                        <td class="fixierung-cell">15J</td>
+                        <td class="rate-cell">€2,113.00</td>
+                        <td>4.591 % p.a. fix (15 Jahre)<br><small style='color: #7f8c8d;'>Anschluss: 5.091 % p.a. variabel</small></td>
+                        <td>4.791 % p.a.</td>
+                        <td>15 Jahre</td>
+                        <td>€500,000.00</td>
+                        <td>€380,340.00</td>
+                        <td>Pfandrecht</td>
+                    </tr>
+
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="table-container">
+            <h2 style="color: #2c3e50; margin-bottom: 20px;">💰 Kostenübersicht</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Fixierung</th>
+                        <th>Auszahlungsbetrag</th>
+                        <th>Einberechnete Kosten</th>
+                        <th>Kreditbetrag</th>
+                        <th>Zu zahlender Gesamtbetrag</th>
+                        <th>Differenz zu 0J</th>
+                    </tr>
+                </thead>
+                <tbody id="kosten-tbody">
+
+                    <tr class="">
+                        <td class="fixierung-cell">0J</td>
+                        <td>€495,000.00</td>
+                        <td>€5,000.00</td>
+                        <td>€500,000.00</td>
+                        <td style="font-weight: bold;">€322,020.00</td>
+                        <td style="color: #27ae60;">€0.00</td>
+                    </tr>
+
+                    <tr class="highlight">
+                        <td class="fixierung-cell">5J</td>
+                        <td>€495,000.00</td>
+                        <td>€5,000.00</td>
+                        <td>€500,000.00</td>
+                        <td style="font-weight: bold;">€345,240.00</td>
+                        <td style="color: #e74c3c;">+€23,220.00</td>
+                    </tr>
+
+                    <tr class="highlight">
+                        <td class="fixierung-cell">10J</td>
+                        <td>€495,000.00</td>
+                        <td>€5,000.00</td>
+                        <td>€500,000.00</td>
+                        <td style="font-weight: bold;">€357,120.00</td>
+                        <td style="color: #e74c3c;">+€35,100.00</td>
+                    </tr>
+
+                    <tr class="highlight">
+                        <td class="fixierung-cell">15J</td>
+                        <td>€495,000.00</td>
+                        <td>€5,000.00</td>
+                        <td>€500,000.00</td>
+                        <td style="font-weight: bold;">€380,340.00</td>
+                        <td style="color: #e74c3c;">+€58,320.00</td>
+                    </tr>
+
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="timestamp">
+            Last Updated: 08.10.2025 15:43:01<br>
+            Data Source: Housing Loan Database | Latest Run ID: 25<br>
+            <small>💡 Tip: Filters work together - selecting "20 Jahre" + "Nur Eff. Zinssatz" shows ONLY Effektiver Zinssatz for 20 Jahre Laufzeit</small>
+        </div>
+    </div>
+</body>
+</html>
