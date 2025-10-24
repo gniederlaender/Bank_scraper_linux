@@ -10,9 +10,16 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import json
+import base64
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 DB_PATH = Path("/opt/Bankcomparison/austrian_banks_housing_loan.db")
 HTML_PATH = Path("/opt/Bankcomparison/bank_comparison_housing_loan_durchblicker.html")
+HTML_EMAIL_PATH = Path("/opt/Bankcomparison/bank_comparison_housing_loan_durchblicker_email.html")
+CHART_PNG_PATH = Path("/opt/Bankcomparison/housing_loan_chart.png")
 
 
 def generate_interactive_chart():
@@ -191,11 +198,102 @@ def generate_interactive_chart():
                 'height': 800,
                 'width': 1400,
                 'scale': 2
-            }
+            },
+            'responsive': True
         }
     )
     
-    return chart_html, laufzeit_values, trace_metadata
+    # Export chart as static PNG for email embedding using matplotlib
+    print("Exporting chart as PNG for email (using matplotlib)...")
+    try:
+        png_base64 = generate_static_png_chart(df, fixierung_values, laufzeit_values, colors)
+        print(f"✓ Chart PNG saved: {CHART_PNG_PATH}")
+    except Exception as e:
+        print(f"⚠️  Warning: Could not export PNG: {e}")
+        print("   (Email version will be generated without chart)")
+        png_base64 = None
+    
+    return chart_html, laufzeit_values, trace_metadata, png_base64
+
+
+def generate_static_png_chart(df, fixierung_values, laufzeit_values, colors):
+    """Generate static PNG chart using matplotlib for email embedding - Default: 25J and Eff. Zinssatz only"""
+    
+    # Create figure
+    plt.figure(figsize=(14, 7))
+    
+    # Default: Only show 25J Laufzeit and Effektiver Zinssatz
+    target_laufzeit = 25
+    show_zinssatz = False  # Only show Effektiver Zinssatz
+    
+    # Plot data for each Fixierung (only for 25J Laufzeit)
+    for fixierung in fixierung_values:
+        # Filter data for this combination (only 25J Laufzeit)
+        mask = (df['fixierung_jahre'] == fixierung) & (df['run_laufzeit_jahre'] == target_laufzeit)
+        data = df[mask].copy()
+        
+        if data.empty:
+            continue
+        
+        data = data.sort_values('scrape_timestamp')
+        color = colors.get(fixierung, '#333333')
+        
+        # Only plot Effektiver Zinssatz (dashed line)
+        plt.plot(
+            data['scrape_timestamp'],
+            data['effektiver_zinssatz_numeric'],
+            marker='s',
+            linewidth=2.5,
+            markersize=5,
+            linestyle='--',
+            color=color,
+            label=f'{fixierung}J fix - 25J Eff. Zinssatz',
+            alpha=0.8
+        )
+    
+    # Customize plot
+    plt.title('Immobilienkredit Zinsentwicklung - 25 Jahre Laufzeit (Eff. Zinssatz)', 
+              fontsize=16, fontweight='bold', pad=15)
+    plt.xlabel('Datum', fontsize=12, fontweight='bold')
+    plt.ylabel('Zinssatz (%)', fontsize=12, fontweight='bold')
+    
+    # Format x-axis
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d.%m.%Y'))
+    plt.xticks(rotation=45)
+    
+    # Add grid
+    plt.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+    
+    # Add legend (outside plot area)
+    plt.legend(loc='center left', bbox_to_anchor=(1, 0.5), 
+               frameon=True, shadow=True, fontsize=8)
+    
+    # Set background
+    plt.gca().set_facecolor('#fafafa')
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save to PNG file
+    plt.savefig(CHART_PNG_PATH, dpi=150, bbox_inches='tight', 
+                facecolor='white', edgecolor='none')
+    
+    # Save to bytes for base64 encoding
+    from io import BytesIO
+    buf = BytesIO()
+    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight',
+                facecolor='white', edgecolor='none')
+    buf.seek(0)
+    png_bytes = buf.read()
+    buf.close()
+    
+    # Close figure to free memory
+    plt.close()
+    
+    # Convert to base64
+    png_base64 = base64.b64encode(png_bytes).decode()
+    
+    return png_base64
 
 
 def get_all_runs_data():
@@ -235,18 +333,18 @@ def generate_html():
     """Generate HTML page with interactive Plotly chart and data tables"""
     
     # Generate chart
-    chart_html, laufzeit_values, trace_metadata = generate_interactive_chart()
+    chart_html, laufzeit_values, trace_metadata, png_base64 = generate_interactive_chart()
     
     if not chart_html:
         print("⚠️ No data found in database")
-        return False
+        return False, None
     
     # Get all runs data
     runs, all_variations = get_all_runs_data()
     
     if not runs:
         print("⚠️ No data found in database")
-        return False
+        return False, None
     
     # Get latest run for initial table display
     latest_run = runs[0]
@@ -290,7 +388,7 @@ def generate_html():
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 0;
             padding: 20px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(to bottom right, #f9fafb, #ffffff, #f3f4f6);
             min-height: 100vh;
         }}
         .container {{
@@ -331,7 +429,7 @@ def generate_html():
         }}
         .chart-controls {{
             display: flex;
-            gap: 30px;
+            gap: 20px;
             margin-bottom: 20px;
             padding: 15px;
             background: white;
@@ -343,25 +441,29 @@ def generate_html():
         .control-group {{
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
+            flex-wrap: wrap;
         }}
         .control-label {{
             font-weight: bold;
             color: #2c3e50;
             font-size: 14px;
+            white-space: nowrap;
         }}
         select, button {{
-            padding: 8px 15px;
+            padding: 10px 12px;
             border: 2px solid #667eea;
             border-radius: 6px;
             font-size: 14px;
             font-family: 'Segoe UI', Arial;
             cursor: pointer;
             transition: all 0.3s;
+            min-height: 40px;
         }}
         select {{
             background: white;
             color: #2c3e50;
+            min-width: 140px;
         }}
         select:hover {{
             border-color: #764ba2;
@@ -369,6 +471,7 @@ def generate_html():
         button {{
             background: white;
             color: #667eea;
+            min-width: 100px;
         }}
         button.active {{
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -463,22 +566,141 @@ def generate_html():
         }}
         @media (max-width: 768px) {{
             body {{
-                padding: 10px;
+                margin: 0;
+                padding: 5px;
             }}
             .container {{
-                padding: 15px;
+                margin: 0;
+                padding: 10px;
+                border-radius: 0;
+                box-shadow: none;
             }}
             h1 {{
-                font-size: 1.5em;
+                font-size: 1.4em;
+                margin-bottom: 15px;
+            }}
+            .subtitle {{
+                font-size: 0.9em;
+                margin-bottom: 20px;
+            }}
+            .info-badge {{
+                font-size: 0.8em;
+                padding: 6px 12px;
+                margin: 3px;
+            }}
+            .run-info {{
+                padding: 15px;
+                margin-bottom: 20px;
+            }}
+            .run-info h3 {{
+                font-size: 1.1em;
+            }}
+            .run-info-grid {{
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }}
+            .info-item {{
+                padding: 6px;
             }}
             .chart-container {{
                 padding: 15px;
+                margin-bottom: 20px;
+            }}
+            .chart-controls {{
+                flex-direction: column;
+                gap: 15px;
+                padding: 12px;
+            }}
+            .control-group {{
+                width: 100%;
+                justify-content: space-between;
+                gap: 10px;
+            }}
+            .control-label {{
+                font-size: 13px;
+            }}
+            select, button {{
+                padding: 8px 10px;
+                font-size: 13px;
+                min-height: 36px;
+                flex: 1;
+            }}
+            select {{
+                min-width: auto;
+            }}
+            button {{
+                min-width: auto;
+            }}
+            /* Plotly chart mobile adjustments */
+            #plotly-chart {{
+                height: 400px !important;
+            }}
+            .js-plotly-plot .plotly .modebar {{
+                display: none !important;
+            }}
+            .js-plotly-plot .plotly .legend {{
+                display: none !important;
             }}
             table {{
-                font-size: 0.85em;
+                font-size: 11px;
+                min-width: 500px;
             }}
             th, td {{
-                padding: 8px 6px;
+                padding: 8px 4px;
+                white-space: nowrap;
+            }}
+            .fixierung-cell {{
+                font-size: 12px;
+            }}
+            .rate-cell {{
+                font-size: 12px;
+            }}
+            .table-container {{
+                margin-bottom: 20px;
+            }}
+            .timestamp {{
+                font-size: 0.8em;
+                margin-top: 20px;
+                padding-top: 15px;
+            }}
+        }}
+        @media (max-width: 480px) {{
+            body {{
+                padding: 2px;
+            }}
+            .container {{
+                padding: 5px;
+            }}
+            h1 {{
+                font-size: 1.2em;
+            }}
+            .chart-container {{
+                padding: 10px;
+            }}
+            .chart-controls {{
+                padding: 8px;
+            }}
+            .control-group {{
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+            }}
+            .control-label {{
+                text-align: center;
+            }}
+            select, button {{
+                width: 100%;
+                margin: 2px 0;
+            }}
+            #plotly-chart {{
+                height: 300px !important;
+            }}
+            table {{
+                font-size: 10px;
+                min-width: 450px;
+            }}
+            th, td {{
+                padding: 6px 2px;
             }}
         }}
     </style>
@@ -486,16 +708,9 @@ def generate_html():
 <body>
     <div class="container">
         <h1>🏠 Housing Loan Comparison</h1>
-        <div class="subtitle">
-            Interactive Interest Rate Analysis
-            <br>
-            <span class="info-badge">📊 Combined Filters (Laufzeit AND Zinssatz)</span>
-            <span class="info-badge">🔍 Click legend to toggle lines</span>
-            <span class="info-badge">🖱️ Hover for details</span>
-        </div>
         
         <div class="run-info">
-            <h3>📊 Aktuellste Berechnung</h3>
+            <h3>📊 Parameter für 25 Jahre Laufzeit</h3>
             <div class="run-info-grid">
                 <div class="info-item">
                     <span class="info-label">Kreditbetrag:</span>
@@ -538,13 +753,13 @@ def generate_html():
                     <span class="control-label">Laufzeit:</span>
                     <select id="laufzeit-filter">
                         <option value="all">Alle Laufzeiten</option>
-{f''.join([f'                        <option value="{lz}">{lz} Jahre</option>\n' for lz in laufzeit_values])}                    </select>
+{f''.join([f'                        <option value="{lz}"{" selected" if lz == 25 else ""}>{lz} Jahre</option>\n' for lz in laufzeit_values])}                    </select>
                 </div>
                 <div class="control-group">
                     <span class="control-label">Anzeigen:</span>
-                    <button id="btn-beide" class="active" onclick="setZinssatzFilter('beide')">Beide</button>
+                    <button id="btn-beide" onclick="setZinssatzFilter('beide')">Beide</button>
                     <button id="btn-zinssatz" onclick="setZinssatzFilter('zinssatz')">Nur Zinssatz</button>
-                    <button id="btn-effektiver" onclick="setZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
+                    <button id="btn-effektiver" class="active" onclick="setZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
                 </div>
             </div>
             
@@ -558,8 +773,8 @@ def generate_html():
                 const tableData = {json.dumps(table_data_for_js)};
                 
                 // Current filter states
-                let currentLaufzeit = 'all';
-                let currentZinssatz = 'beide';
+                let currentLaufzeit = '25';
+                let currentZinssatz = 'effektiver';
                 
                 // Apply combined filters (chart + tables)
                 function applyFilters() {{
@@ -592,7 +807,7 @@ def generate_html():
                 function updateTables() {{
                     if (currentLaufzeit === 'all') {{
                         // Show latest overall run (could be any Laufzeit)
-                        const latestLaufzeit = {latest_run['laufzeit_jahre']};
+                        const latestLaufzeit = 25;
                         renderTables(tableData[latestLaufzeit], latestLaufzeit, 'Aktuellste Berechnung (Alle Laufzeiten)');
                     }} else {{
                         // Show latest run for selected Laufzeit
@@ -609,7 +824,14 @@ def generate_html():
                     const variations = data.variations;
                     
                     // Update run info section
-                    document.querySelector('.run-info h3').textContent = '📊 ' + headerText;
+                    document.querySelector('.run-info h3').textContent = '📊 Parameter für ' + laufzeit + ' Jahre Laufzeit';
+                    
+                    // Update Finanzierungsdetails table title
+                    const finanzTitle = document.querySelector('.table-container h2');
+                    if (finanzTitle) {{
+                        finanzTitle.textContent = '📋 Finanzierungsdetails - Aktuelle Konditionen für ' + laufzeit + ' Jahre Laufzeit';
+                    }}
+                    
                     document.querySelectorAll('.info-value')[0].textContent = '€' + run.kreditbetrag.toLocaleString('de-DE');
                     document.querySelectorAll('.info-value')[1].textContent = run.laufzeit_jahre + ' Jahre';
                     document.querySelectorAll('.info-value')[2].textContent = '€' + run.kaufpreis.toLocaleString('de-DE');
@@ -634,7 +856,7 @@ def generate_html():
                                     <td>${{v.laufzeit}}</td>
                                     <td>€${{v.kreditbetrag.toLocaleString('de-DE', {{minimumFractionDigits: 2, maximumFractionDigits: 2}})}}</td>
                                     <td>€${{v.gesamtbetrag.toLocaleString('de-DE', {{minimumFractionDigits: 2, maximumFractionDigits: 2}})}}</td>
-                                    <td>${{v.besicherung}}</td>
+                                    <td>€${{v.einberechnete_kosten.toLocaleString('de-DE', {{minimumFractionDigits: 2, maximumFractionDigits: 2}})}}</td>
                                 </tr>`;
                         }} else {{
                             finanzTable += `
@@ -646,30 +868,6 @@ def generate_html():
                     }});
                     document.querySelector('#finanz-tbody').innerHTML = finanzTable;
                     
-                    // Build Kostenübersicht table
-                    const baseline = variations.find(v => v.fixierung_jahre === 0 && v.gesamtbetrag);
-                    const baselineTotal = baseline ? baseline.gesamtbetrag : 0;
-                    
-                    let kostenTable = '';
-                    variations.forEach(v => {{
-                        if (v.rate) {{
-                            const diff = v.gesamtbetrag - baselineTotal;
-                            const diffClass = Math.abs(diff) > 1000 ? 'highlight' : '';
-                            const diffSign = diff > 0 ? '+' : '';
-                            const diffColor = diff > 0 ? '#e74c3c' : '#27ae60';
-                            
-                            kostenTable += `
-                                <tr class="${{diffClass}}">
-                                    <td class="fixierung-cell">${{v.fixierung_jahre}}J</td>
-                                    <td>€${{v.auszahlungsbetrag.toLocaleString('de-DE', {{minimumFractionDigits: 2, maximumFractionDigits: 2}})}}</td>
-                                    <td>€${{v.einberechnete_kosten.toLocaleString('de-DE', {{minimumFractionDigits: 2, maximumFractionDigits: 2}})}}</td>
-                                    <td>€${{v.kreditbetrag.toLocaleString('de-DE', {{minimumFractionDigits: 2, maximumFractionDigits: 2}})}}</td>
-                                    <td style="font-weight: bold;">€${{v.gesamtbetrag.toLocaleString('de-DE', {{minimumFractionDigits: 2, maximumFractionDigits: 2}})}}</td>
-                                    <td style="color: ${{diffColor}};">${{diffSign}}€${{diff.toLocaleString('de-DE', {{minimumFractionDigits: 2, maximumFractionDigits: 2}})}}</td>
-                                </tr>`;
-                        }}
-                    }});
-                    document.querySelector('#kosten-tbody').innerHTML = kostenTable;
                     
                     // Update timestamp with run ID
                     const timestampDiv = document.querySelector('.timestamp');
@@ -696,11 +894,51 @@ def generate_html():
                     
                     applyFilters();
                 }}
+                
+                // Mobile responsiveness for Plotly chart
+                function handleResize() {{
+                    const chartDiv = document.getElementById('plotly-chart');
+                    if (chartDiv && chartDiv.data) {{
+                        const isMobile = window.innerWidth <= 768;
+                        const isSmallMobile = window.innerWidth <= 480;
+                        
+                        let newHeight = 600;
+                        let newMargin = {{l: 80, r: 280, t: 80, b: 80}};
+                        let showLegend = true;
+                        
+                        if (isSmallMobile) {{
+                            newHeight = 300;
+                            newMargin = {{l: 50, r: 50, t: 60, b: 60}};
+                            showLegend = false;
+                        }} else if (isMobile) {{
+                            newHeight = 400;
+                            newMargin = {{l: 60, r: 60, t: 70, b: 70}};
+                            showLegend = false;
+                        }}
+                        
+                        Plotly.relayout('plotly-chart', {{
+                            height: newHeight,
+                            margin: newMargin,
+                            showlegend: showLegend
+                        }});
+                    }}
+                }}
+                
+                // Add resize listener
+                window.addEventListener('resize', handleResize);
+                
+                // Initial resize check
+                setTimeout(handleResize, 1000);
+                
+                // Apply initial filters after chart loads
+                setTimeout(() => {{
+                    applyFilters();
+                }}, 1500);
             </script>
         </div>
         
         <div class="table-container">
-            <h2 style="color: #2c3e50; margin-bottom: 20px;">📋 Finanzierungsdetails - Aktuellste Konditionen</h2>
+            <h2 style="color: #2c3e50; margin-bottom: 20px;">📋 Finanzierungsdetails - Aktuelle Konditionen für 25 Jahre Laufzeit</h2>
             <table>
                 <thead>
                     <tr>
@@ -711,7 +949,7 @@ def generate_html():
                         <th>Laufzeit</th>
                         <th>Kreditbetrag</th>
                         <th>Gesamtbetrag</th>
-                        <th>Besicherung</th>
+                        <th>Einberechnete Kosten</th>
                     </tr>
                 </thead>
                 <tbody id="finanz-tbody">
@@ -747,52 +985,9 @@ def generate_html():
             </table>
         </div>
         
-        <div class="table-container">
-            <h2 style="color: #2c3e50; margin-bottom: 20px;">💰 Kostenübersicht</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Fixierung</th>
-                        <th>Auszahlungsbetrag</th>
-                        <th>Einberechnete Kosten</th>
-                        <th>Kreditbetrag</th>
-                        <th>Zu zahlender Gesamtbetrag</th>
-                        <th>Differenz zu 0J</th>
-                    </tr>
-                </thead>
-                <tbody id="kosten-tbody">
-'''
-    
-    # Calculate baseline (0 years Fixierung) for comparison
-    baseline_var = next((v for v in latest_variations if v['fixierung_jahre'] == 0 and v['gesamtbetrag']), None)
-    baseline_gesamtbetrag = baseline_var['gesamtbetrag'] if baseline_var else 0
-    
-    for var in latest_variations:
-        if var['rate']:
-            diff = var['gesamtbetrag'] - baseline_gesamtbetrag if baseline_gesamtbetrag else 0
-            diff_class = 'highlight' if abs(diff) > 1000 else ''
-            diff_sign = '+' if diff > 0 else ''
-            
-            html_content += f'''
-                    <tr class="{diff_class}">
-                        <td class="fixierung-cell">{var['fixierung_jahre']}J</td>
-                        <td>€{var['auszahlungsbetrag']:,.2f}</td>
-                        <td>€{var['einberechnete_kosten']:,.2f}</td>
-                        <td>€{var['kreditbetrag']:,.2f}</td>
-                        <td style="font-weight: bold;">€{var['gesamtbetrag']:,.2f}</td>
-                        <td style="color: {'#e74c3c' if diff > 0 else '#27ae60'};">{diff_sign}€{diff:,.2f}</td>
-                    </tr>
-'''
-    
-    html_content += f'''
-                </tbody>
-            </table>
-        </div>
-        
         <div class="timestamp">
             Last Updated: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}<br>
             Data Source: Housing Loan Database | Latest Run ID: {latest_run['id']}<br>
-            <small>💡 Tip: Filters work together - selecting "20 Jahre" + "Nur Eff. Zinssatz" shows ONLY Effektiver Zinssatz for 20 Jahre Laufzeit</small>
         </div>
     </div>
 </body>
@@ -804,6 +999,446 @@ def generate_html():
         f.write(html_content)
     
     print(f"✓ HTML page generated: {HTML_PATH}")
+    return True, png_base64
+
+
+def generate_email_html(png_base64):
+    """Generate simplified HTML for email with static PNG chart (no JavaScript)"""
+    
+    if not png_base64:
+        print("⚠️  No PNG data available, cannot generate email HTML")
+        return False
+    
+    # Get all runs data
+    runs, all_variations = get_all_runs_data()
+    
+    if not runs:
+        print("⚠️ No data found in database")
+        return False
+    
+    # Get 25J run for table display (default)
+    latest_run = None
+    latest_variations = None
+    
+    # Find the latest 25J run
+    for run in runs:
+        if run['laufzeit_jahre'] == 25:
+            latest_run = run
+            latest_variations = all_variations[run['id']]
+            break
+    
+    # Fallback to first run if no 25J found
+    if not latest_run:
+        latest_run = runs[0]
+        latest_variations = all_variations[latest_run['id']]
+    
+    # Create simplified HTML content for email (no JavaScript)
+    html_content = f'''<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bank Comparison - Housing Loan Analysis</title>
+    <style>
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(to bottom right, #f9fafb, #ffffff, #f3f4f6);
+            min-height: 100vh;
+        }}
+        .interactive-button {{
+            display: block;
+            width: fit-content;
+            margin: 25px auto;
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white !important;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 1.1em;
+            font-weight: bold;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            transition: all 0.3s;
+        }}
+        .interactive-button:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+            text-decoration: none;
+        }}
+        .container {{
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }}
+        h1 {{
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.2em;
+        }}
+        .subtitle {{
+            text-align: center;
+            color: #7f8c8d;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }}
+        .chart-container {{
+            margin-bottom: 40px;
+            padding: 25px;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            text-align: center;
+        }}
+        .chart-container img {{
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }}
+        .run-info {{
+            background-color: #ecf0f1;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            border-left: 5px solid #3498db;
+        }}
+        .run-info h3 {{
+            margin-top: 0;
+            color: #2c3e50;
+            font-size: 1.3em;
+        }}
+        .run-info-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }}
+        .info-item {{
+            display: flex;
+            justify-content: space-between;
+            padding: 8px;
+            background-color: white;
+            border-radius: 4px;
+        }}
+        .info-label {{
+            font-weight: bold;
+            color: #34495e;
+        }}
+        .info-value {{
+            color: #2c3e50;
+            font-family: monospace;
+        }}
+        .table-container {{
+            overflow-x: auto;
+            margin-bottom: 30px;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            font-size: 0.95em;
+        }}
+        th {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 12px;
+            text-align: left;
+            font-weight: 600;
+        }}
+        td {{
+            padding: 12px;
+            border-bottom: 1px solid #ecf0f1;
+        }}
+        tr:hover {{
+            background-color: #f8f9fa;
+        }}
+        tr:nth-child(even) {{
+            background-color: #fafbfc;
+        }}
+        .fixierung-cell {{
+            font-weight: bold;
+            color: #2c3e50;
+            background-color: #e8f4f8 !important;
+        }}
+        .rate-cell {{
+            font-weight: bold;
+            color: #27ae60;
+            font-size: 1.1em;
+        }}
+        .timestamp {{
+            text-align: center;
+            color: #7f8c8d;
+            font-size: 0.9em;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #ecf0f1;
+        }}
+        .highlight {{
+            background-color: #fff3cd !important;
+        }}
+        @media (max-width: 768px) {{
+            body {{
+                margin: 0;
+                padding: 5px;
+            }}
+            .container {{
+                margin: 0;
+                padding: 10px;
+                border-radius: 0;
+                box-shadow: none;
+            }}
+            h1 {{
+                font-size: 1.4em;
+                margin-bottom: 15px;
+            }}
+            .subtitle {{
+                font-size: 0.9em;
+                margin-bottom: 20px;
+            }}
+            .info-badge {{
+                font-size: 0.8em;
+                padding: 6px 12px;
+                margin: 3px;
+            }}
+            .run-info {{
+                padding: 15px;
+                margin-bottom: 20px;
+            }}
+            .run-info h3 {{
+                font-size: 1.1em;
+            }}
+            .run-info-grid {{
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }}
+            .info-item {{
+                padding: 6px;
+            }}
+            .chart-container {{
+                padding: 15px;
+                margin-bottom: 20px;
+            }}
+            .chart-controls {{
+                flex-direction: column;
+                gap: 15px;
+                padding: 12px;
+            }}
+            .control-group {{
+                width: 100%;
+                justify-content: space-between;
+                gap: 10px;
+            }}
+            .control-label {{
+                font-size: 13px;
+            }}
+            select, button {{
+                padding: 8px 10px;
+                font-size: 13px;
+                min-height: 36px;
+                flex: 1;
+            }}
+            select {{
+                min-width: auto;
+            }}
+            button {{
+                min-width: auto;
+            }}
+            /* Plotly chart mobile adjustments */
+            #plotly-chart {{
+                height: 400px !important;
+            }}
+            .js-plotly-plot .plotly .modebar {{
+                display: none !important;
+            }}
+            .js-plotly-plot .plotly .legend {{
+                display: none !important;
+            }}
+            table {{
+                font-size: 11px;
+                min-width: 500px;
+            }}
+            th, td {{
+                padding: 8px 4px;
+                white-space: nowrap;
+            }}
+            .fixierung-cell {{
+                font-size: 12px;
+            }}
+            .rate-cell {{
+                font-size: 12px;
+            }}
+            .table-container {{
+                margin-bottom: 20px;
+            }}
+            .timestamp {{
+                font-size: 0.8em;
+                margin-top: 20px;
+                padding-top: 15px;
+            }}
+        }}
+        @media (max-width: 480px) {{
+            body {{
+                padding: 2px;
+            }}
+            .container {{
+                padding: 5px;
+            }}
+            h1 {{
+                font-size: 1.2em;
+            }}
+            .chart-container {{
+                padding: 10px;
+            }}
+            .chart-controls {{
+                padding: 8px;
+            }}
+            .control-group {{
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+            }}
+            .control-label {{
+                text-align: center;
+            }}
+            select, button {{
+                width: 100%;
+                margin: 2px 0;
+            }}
+            #plotly-chart {{
+                height: 300px !important;
+            }}
+            table {{
+                font-size: 10px;
+                min-width: 450px;
+            }}
+            th, td {{
+                padding: 6px 2px;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+                <h1>🏠 Housing Loan Comparison</h1>
+                <div class="subtitle">
+                    Zinsentwicklung - 25 Jahre Laufzeit (Eff. Zinssatz)
+                </div>
+        
+        <a href="https://smartprototypes.net/Bank_market_overview/bank_comparison_housing_loan_durchblicker.html" class="interactive-button" target="_blank">
+            🔗 Go to Interactive Version
+        </a>
+        
+        <div class="chart-container">
+            <h2 style="color: #2c3e50; margin-bottom: 15px;">📊 Zinsentwicklung</h2>
+            <img src="data:image/png;base64,{png_base64}" alt="Housing Loan Interest Rate Chart">
+        </div>
+        
+                <div class="run-info">
+                    <h3>📊 Aktuelle Konditionen für 25 Jahre Laufzeit</h3>
+            <div class="run-info-grid">
+                <div class="info-item">
+                    <span class="info-label">Kreditbetrag:</span>
+                    <span class="info-value">€{latest_run['kreditbetrag']:,.0f}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Laufzeit:</span>
+                    <span class="info-value">{latest_run['laufzeit_jahre']} Jahre</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Kaufpreis:</span>
+                    <span class="info-value">€{latest_run['kaufpreis']:,.0f}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Kaufnebenkosten:</span>
+                    <span class="info-value">€{latest_run['kaufnebenkosten']:,.0f}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Eigenmittel:</span>
+                    <span class="info-value">€{latest_run['eigenmittel']:,.0f}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Haushalt Alter:</span>
+                    <span class="info-value">{latest_run['haushalt_alter']} Jahre</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Netto-Einkommen:</span>
+                    <span class="info-value">€{latest_run['haushalt_einkommen']:,.2f}/Monat</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Wohnnutzfläche:</span>
+                    <span class="info-value">{latest_run['haushalt_nutzflaeche']} m²</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="table-container">
+            <h2 style="color: #2c3e50; margin-bottom: 20px;">📋 Finanzierungsdetails - Aktuelle Konditionen für 25 Jahre Laufzeit</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Fixierung</th>
+                        <th>Monatliche Rate</th>
+                        <th>Zinssatz</th>
+                        <th>Effektiver Zinssatz</th>
+                        <th>Laufzeit</th>
+                        <th>Kreditbetrag</th>
+                        <th>Gesamtbetrag</th>
+                        <th>Einberechnete Kosten</th>
+                    </tr>
+                </thead>
+                <tbody>
+'''
+    
+    # Add table rows for latest variations
+    for var in latest_variations:
+        if var['rate']:
+            anschluss_note = f"<br><small style='color: #7f8c8d;'>Anschluss: {var['anschlusskondition']}</small>" if var['anschlusskondition'] else ""
+            
+            html_content += f'''
+                    <tr>
+                        <td class="fixierung-cell">{var['fixierung_jahre']}J</td>
+                        <td class="rate-cell">€{var['rate']:,.2f}</td>
+                        <td>{var['zinssatz']}{anschluss_note}</td>
+                        <td>{var['effektiver_zinssatz']}</td>
+                        <td>{var['laufzeit']}</td>
+                        <td>€{var['kreditbetrag']:,.2f}</td>
+                        <td>€{var['gesamtbetrag']:,.2f}</td>
+                        <td>{var['besicherung']}</td>
+                    </tr>
+'''
+        else:
+            html_content += f'''
+                    <tr>
+                        <td class="fixierung-cell">{var['fixierung_jahre']}J</td>
+                        <td colspan="7" style="text-align: center; color: #95a5a6;">Keine Daten verfügbar</td>
+                    </tr>
+'''
+    
+    html_content += f'''
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="timestamp">
+            Last Updated: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}<br>
+            Data Source: Housing Loan Database | Latest Run ID: {latest_run['id']}<br>
+        </div>
+    </div>
+</body>
+</html>
+'''
+    
+    # Write to file
+    with open(HTML_EMAIL_PATH, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    
+    print(f"✓ Email HTML page generated: {HTML_EMAIL_PATH}")
     return True
 
 
@@ -824,16 +1459,34 @@ if __name__ == "__main__":
         print("   Please run: python3 create_housing_loan_view.py")
         exit(1)
     
-    success = generate_html()
+    # Generate interactive HTML (for website)
+    print("📄 Generating interactive HTML for web...")
+    success, png_base64 = generate_html()
     
     if success:
-        print("\n✅ HTML report generated successfully!")
-        print(f"   📄 HTML: {HTML_PATH}")
+        print("\n✅ Interactive HTML report generated successfully!")
+        print(f"   📄 Web HTML: {HTML_PATH}")
+        print(f"   🖼️  Chart PNG: {CHART_PNG_PATH}")
+        
+        # Generate email HTML (with static PNG)
+        print("\n📧 Generating email-friendly HTML...")
+        email_success = generate_email_html(png_base64)
+        
+        if email_success:
+            print("\n✅ Email HTML report generated successfully!")
+            print(f"   📧 Email HTML: {HTML_EMAIL_PATH}")
+        else:
+            print("\n⚠️  Email HTML generation failed (continuing anyway)")
+        
         print(f"\n   Open in browser: file://{HTML_PATH.absolute()}")
-        print("\n   🎯 Features:")
+        print("\n   🎯 Web Version Features:")
         print("      • Laufzeit dropdown filter (All, 15, 20, 25, 30 Jahre)")
         print("      • Toggle Zinssatz / Effektiver Zinssatz")
         print("      • Interactive legend (click to show/hide)")
         print("      • Zoom, pan, hover for details")
+        print("\n   📧 Email Version Features:")
+        print("      • Static PNG chart (works in all email clients)")
+        print("      • No JavaScript required")
+        print("      • Embedded base64 image")
     else:
         print("\n❌ HTML generation failed!")
