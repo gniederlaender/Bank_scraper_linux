@@ -873,7 +873,7 @@ def generate_html():
                     const timestampDiv = document.querySelector('.timestamp');
                     const currentTime = timestampDiv.innerHTML.split('<br>')[0];
                     timestampDiv.innerHTML = currentTime + '<br>Data Source: Housing Loan Database | Run ID: ' + run.id + 
-                        '<br><small>💡 Tip: Filters work together - selecting "20 Jahre" + "Nur Eff. Zinssatz" shows ONLY Effektiver Zinssatz for 20 Jahre Laufzeit</small>';
+                        '';
                 }}
                 
                 // Laufzeit dropdown change handler
