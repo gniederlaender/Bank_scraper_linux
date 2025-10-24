@@ -1052,20 +1052,33 @@ def generate_email_html(png_base64):
             width: fit-content;
             margin: 25px auto;
             padding: 15px 30px;
+            background-color: #667eea !important;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white !important;
-            text-decoration: none;
+            text-decoration: none !important;
             border-radius: 8px;
             font-size: 1.1em;
             font-weight: bold;
             text-align: center;
             box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            border: 2px solid #667eea;
             transition: all 0.3s;
         }}
         .interactive-button:hover {{
+            background-color: #764ba2 !important;
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
-            text-decoration: none;
+            text-decoration: none !important;
+            color: white !important;
+        }}
+        .interactive-button:visited {{
+            color: white !important;
+            text-decoration: none !important;
+        }}
+        .interactive-button:link {{
+            color: white !important;
+            text-decoration: none !important;
         }}
         .container {{
             max-width: 1200px;
@@ -1330,7 +1343,7 @@ def generate_email_html(png_base64):
                     Zinsentwicklung - 25 Jahre Laufzeit (Eff. Zinssatz)
                 </div>
         
-        <a href="https://smartprototypes.net/Bank_market_overview/bank_comparison_housing_loan_durchblicker.html" class="interactive-button" target="_blank">
+        <a href="https://smartprototypes.net/Bank_market_overview/bank_comparison_housing_loan_durchblicker.html" class="interactive-button" target="_blank" style="background-color: #667eea !important; color: white !important; text-decoration: none !important;">
             🔗 Go to Interactive Version
         </a>
         
