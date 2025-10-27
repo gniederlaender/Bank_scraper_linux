@@ -4,6 +4,7 @@ Generate HTML page with interactive Plotly charts for housing loan data from dur
 """
 
 import sqlite3
+import os
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
@@ -16,10 +17,14 @@ matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-DB_PATH = Path("/opt/Bankcomparison/austrian_banks_housing_loan.db")
-HTML_PATH = Path("/opt/Bankcomparison/bank_comparison_housing_loan_durchblicker.html")
-HTML_EMAIL_PATH = Path("/opt/Bankcomparison/bank_comparison_housing_loan_durchblicker_email.html")
-CHART_PNG_PATH = Path("/opt/Bankcomparison/housing_loan_chart.png")
+from db_helper import get_all_loan_offers
+
+# Get paths from environment or use relative paths
+BASE_DIR = Path(os.getenv('BANKCOMPARISON_BASE_DIR', '.'))
+DB_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_DB_PATH', 'austrian_banks_housing_loan.db')
+HTML_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_HTML_PATH', 'bank_comparison_housing_loan_durchblicker.html')
+HTML_EMAIL_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_EMAIL_HTML_PATH', 'bank_comparison_housing_loan_durchblicker_email.html')
+CHART_PNG_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_CHART_PNG_PATH', 'housing_loan_chart.png')
 
 
 def generate_interactive_chart():
@@ -51,7 +56,7 @@ def generate_interactive_chart():
     conn.close()
     
     if df.empty:
-        print("⚠️ No data available for chart generation")
+        print("[WARN] No data available for chart generation")
         return None, []
     
     # Convert timestamp to datetime
@@ -131,6 +136,86 @@ def generate_interactive_chart():
                 customdata=[[laufzeit, 'effektiver', fixierung]] * len(data)
             ))
     
+    # Add user loan offers if available
+    try:
+        user_offers = get_all_loan_offers()
+        
+        if user_offers:
+            print(f"[INFO] Adding {len(user_offers)} individual user offers to chart...")
+            
+            # Get unique anbieters for color assignment
+            anbieters = list(set(offer['anbieter'] for offer in user_offers))
+            
+            # Color palette for different anbieters
+            colors_user = {
+                # Predefined colors for known banks
+                'UniCredit Bank Austria AG': '#FF0000',  # Red
+                'Raiffeisen': '#FF6B6B',  # Light red
+                'Sparkasse': '#4ECDC4',  # Turquoise
+                'Erste Bank': '#95E1D3',  # Light turquoise
+            }
+            
+            # Default colors for other banks
+            default_colors = ['#FFA500', '#FFD700', '#FF69B4', '#FF1493', '#32CD32', '#1E90FF']
+            
+            anbieter_traces = {}  # Track traces per anbieter
+            
+            for i, offer in enumerate(user_offers):
+                anbieter = offer['anbieter']
+                date = offer['angebotsdatum']
+                laufzeit_numeric = offer.get('laufzeit_numeric')  # Get parsed laufzeit
+                
+                # Get color for this anbieter
+                color = colors_user.get(anbieter, default_colors[i % len(default_colors)])
+                
+                # Create trace name pattern for grouping
+                trace_name = f"User Offer: {anbieter[:20]}..."
+                
+                # Trace for fixzinssatz
+                fig.add_trace(go.Scatter(
+                    x=[date],
+                    y=[offer['fixzinssatz']],
+                    mode='markers',
+                    name=trace_name,
+                    line=dict(color=color, width=1),
+                    marker=dict(size=12, symbol='star', color=color, line=dict(width=2, color='black')),
+                    legendgroup='user_offers',
+                    hovertemplate=(
+                        f'<b>Individual Offer - {anbieter}</b><br>'
+                        'Datum: %{x|%d.%m.%Y}<br>'
+                        f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
+                        f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
+                        f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
+                        '<extra></extra>'
+                    ),
+                    visible=False,  # Hidden by default
+                    customdata=[[laufzeit_numeric, 'user_offer_fix', None]]
+                ))
+                
+                # Trace for effektivzinssatz
+                fig.add_trace(go.Scatter(
+                    x=[date],
+                    y=[offer['effektivzinssatz']],
+                    mode='markers',
+                    name=trace_name + ' (Eff.)',
+                    line=dict(color=color, width=1),
+                    marker=dict(size=12, symbol='diamond', color=color, line=dict(width=2, color='black')),
+                    legendgroup='user_offers',
+                    hovertemplate=(
+                        f'<b>Individual Offer - {anbieter}</b><br>'
+                        'Datum: %{x|%d.%m.%Y}<br>'
+                        f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
+                        f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
+                        f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
+                        '<extra></extra>'
+                    ),
+                    visible=False,  # Hidden by default
+                    customdata=[[laufzeit_numeric, 'user_offer_eff', None]]
+                ))
+                
+    except Exception as e:
+        print(f"[WARN] Could not add user offers to chart: {e}")
+    
     # We'll use custom HTML controls instead of Plotly updatemenus for combined filtering
     # Store trace metadata for JavaScript filtering
     trace_metadata = []
@@ -207,9 +292,9 @@ def generate_interactive_chart():
     print("Exporting chart as PNG for email (using matplotlib)...")
     try:
         png_base64 = generate_static_png_chart(df, fixierung_values, laufzeit_values, colors)
-        print(f"✓ Chart PNG saved: {CHART_PNG_PATH}")
+        print(f"[OK] Chart PNG saved: {CHART_PNG_PATH}")
     except Exception as e:
-        print(f"⚠️  Warning: Could not export PNG: {e}")
+        print(f"[WARN] Warning: Could not export PNG: {e}")
         print("   (Email version will be generated without chart)")
         png_base64 = None
     
@@ -336,14 +421,14 @@ def generate_html():
     chart_html, laufzeit_values, trace_metadata, png_base64 = generate_interactive_chart()
     
     if not chart_html:
-        print("⚠️ No data found in database")
+        print("[WARN] No data found in database")
         return False, None
     
     # Get all runs data
     runs, all_variations = get_all_runs_data()
     
     if not runs:
-        print("⚠️ No data found in database")
+        print("[WARN] No data found in database")
         return False, None
     
     # Get latest run for initial table display
@@ -709,44 +794,6 @@ def generate_html():
     <div class="container">
         <h1>🏠 Housing Loan Comparison</h1>
         
-        <div class="run-info">
-            <h3>📊 Parameter für 25 Jahre Laufzeit</h3>
-            <div class="run-info-grid">
-                <div class="info-item">
-                    <span class="info-label">Kreditbetrag:</span>
-                    <span class="info-value">€{latest_run['kreditbetrag']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Laufzeit:</span>
-                    <span class="info-value">{latest_run['laufzeit_jahre']} Jahre</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Kaufpreis:</span>
-                    <span class="info-value">€{latest_run['kaufpreis']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Kaufnebenkosten:</span>
-                    <span class="info-value">€{latest_run['kaufnebenkosten']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Eigenmittel:</span>
-                    <span class="info-value">€{latest_run['eigenmittel']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Haushalt Alter:</span>
-                    <span class="info-value">{latest_run['haushalt_alter']} Jahre</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Netto-Einkommen:</span>
-                    <span class="info-value">€{latest_run['haushalt_einkommen']:,.2f}/Monat</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Wohnnutzfläche:</span>
-                    <span class="info-value">{latest_run['haushalt_nutzflaeche']} m²</span>
-                </div>
-            </div>
-        </div>
-        
         <div class="chart-container">
             <div class="chart-controls">
                 <div class="control-group">
@@ -760,6 +807,10 @@ def generate_html():
                     <button id="btn-beide" onclick="setZinssatzFilter('beide')">Beide</button>
                     <button id="btn-zinssatz" onclick="setZinssatzFilter('zinssatz')">Nur Zinssatz</button>
                     <button id="btn-effektiver" class="active" onclick="setZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
+                </div>
+                <div class="control-group">
+                    <input type="checkbox" id="show-user-offers" onchange="toggleUserOffers()" />
+                    <label for="show-user-offers" style="font-weight: bold; cursor: pointer;">Show Individual Offers</label>
                 </div>
             </div>
             
@@ -778,23 +829,65 @@ def generate_html():
                 
                 // Apply combined filters (chart + tables)
                 function applyFilters() {{
+                    const data = document.getElementById('plotly-chart').data;
+                    
                     // Update chart visibility
-                    const visible = traceMetadata.map(meta => {{
-                        // Check Laufzeit filter
-                        const laufzeitMatch = currentLaufzeit === 'all' || meta.laufzeit === parseInt(currentLaufzeit);
+                    const visible = [];
+                    
+                    for (let i = 0; i < traceMetadata.length && i < data.length; i++) {{
+                        const meta = traceMetadata[i];
+                        const customdata = data[i].customdata;
                         
-                        // Check Zinssatz type filter
-                        let zinssatzMatch = true;
-                        if (currentZinssatz === 'zinssatz') {{
-                            zinssatzMatch = meta.type === 'zinssatz';
-                        }} else if (currentZinssatz === 'effektiver') {{
-                            zinssatzMatch = meta.type === 'effektiver';
+                        // Check if this is a user offer
+                        const isUserOffer = customdata && customdata.length > 0 && 
+                                          (customdata[0][1] === 'user_offer_fix' || customdata[0][1] === 'user_offer_eff');
+                        
+                        if (isUserOffer) {{
+                            // Handle user offers filtering
+                            // Check if checkbox is checked
+                            const checkbox = document.getElementById('show-user-offers');
+                            const showUserOffers = checkbox && checkbox.checked;
+                            
+                            if (!showUserOffers) {{
+                                visible.push(false);
+                                continue;
+                            }}
+                            
+                            // Get laufzeit from customdata (first element)
+                            const userLaufzeit = customdata[0][0];
+                            
+                            // Check Laufzeit filter for user offers
+                            const laufzeitMatch = currentLaufzeit === 'all' || userLaufzeit === parseInt(currentLaufzeit);
+                            
+                            // Check Zinssatz type filter for user offers
+                            let zinssatzMatch = true;
+                            if (currentZinssatz === 'zinssatz') {{
+                                zinssatzMatch = customdata[0][1] === 'user_offer_fix';
+                            }} else if (currentZinssatz === 'effektiver') {{
+                                zinssatzMatch = customdata[0][1] === 'user_offer_eff';
+                            }}
+                            // 'beide' means both are shown, so zinssatzMatch stays true
+                            
+                            // Return true only if BOTH conditions match (AND logic)
+                            visible.push(laufzeitMatch && zinssatzMatch);
+                        }} else {{
+                            // Handle scraped data filtering (existing logic)
+                            // Check Laufzeit filter
+                            const laufzeitMatch = currentLaufzeit === 'all' || meta.laufzeit === parseInt(currentLaufzeit);
+                            
+                            // Check Zinssatz type filter
+                            let zinssatzMatch = true;
+                            if (currentZinssatz === 'zinssatz') {{
+                                zinssatzMatch = meta.type === 'zinssatz';
+                            }} else if (currentZinssatz === 'effektiver') {{
+                                zinssatzMatch = meta.type === 'effektiver';
+                            }}
+                            // 'beide' means both are shown, so zinssatzMatch stays true
+                            
+                            // Return true only if BOTH conditions match (AND logic)
+                            visible.push(laufzeitMatch && zinssatzMatch);
                         }}
-                        // 'beide' means both are shown, so zinssatzMatch stays true
-                        
-                        // Return true only if BOTH conditions match (AND logic)
-                        return laufzeitMatch && zinssatzMatch;
-                    }});
+                    }}
                     
                     // Update the Plotly chart
                     Plotly.restyle('plotly-chart', {{'visible': visible}});
@@ -895,6 +988,12 @@ def generate_html():
                     applyFilters();
                 }}
                 
+                // Toggle user offers visibility
+                function toggleUserOffers() {{
+                    // Simply reapply all filters to respect current filter settings
+                    applyFilters();
+                }}
+                
                 // Mobile responsiveness for Plotly chart
                 function handleResize() {{
                     const chartDiv = document.getElementById('plotly-chart');
@@ -985,6 +1084,44 @@ def generate_html():
             </table>
         </div>
         
+        <div class="run-info">
+            <h3>📊 Parameter für 25 Jahre Laufzeit</h3>
+            <div class="run-info-grid">
+                <div class="info-item">
+                    <span class="info-label">Kreditbetrag:</span>
+                    <span class="info-value">€{latest_run['kreditbetrag']:,.0f}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Laufzeit:</span>
+                    <span class="info-value">{latest_run['laufzeit_jahre']} Jahre</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Kaufpreis:</span>
+                    <span class="info-value">€{latest_run['kaufpreis']:,.0f}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Kaufnebenkosten:</span>
+                    <span class="info-value">€{latest_run['kaufnebenkosten']:,.0f}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Eigenmittel:</span>
+                    <span class="info-value">€{latest_run['eigenmittel']:,.0f}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Haushalt Alter:</span>
+                    <span class="info-value">{latest_run['haushalt_alter']} Jahre</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Netto-Einkommen:</span>
+                    <span class="info-value">€{latest_run['haushalt_einkommen']:,.2f}/Monat</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Wohnnutzfläche:</span>
+                    <span class="info-value">{latest_run['haushalt_nutzflaeche']} m²</span>
+                </div>
+            </div>
+        </div>
+        
         <div class="timestamp">
             Last Updated: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}<br>
             Data Source: Housing Loan Database | Latest Run ID: {latest_run['id']}<br>
@@ -998,7 +1135,7 @@ def generate_html():
     with open(HTML_PATH, 'w', encoding='utf-8') as f:
         f.write(html_content)
     
-    print(f"✓ HTML page generated: {HTML_PATH}")
+    print(f"[OK] HTML page generated: {HTML_PATH}")
     return True, png_base64
 
 
@@ -1006,14 +1143,14 @@ def generate_email_html(png_base64):
     """Generate simplified HTML for email with static PNG chart (no JavaScript)"""
     
     if not png_base64:
-        print("⚠️  No PNG data available, cannot generate email HTML")
+        print("[WARN] No PNG data available, cannot generate email HTML")
         return False
     
     # Get all runs data
     runs, all_variations = get_all_runs_data()
     
     if not runs:
-        print("⚠️ No data found in database")
+        print("[WARN] No data found in database")
         return False
     
     # Get 25J run for table display (default)
@@ -1352,44 +1489,6 @@ def generate_email_html(png_base64):
             <img src="data:image/png;base64,{png_base64}" alt="Housing Loan Interest Rate Chart">
         </div>
         
-                <div class="run-info">
-                    <h3>📊 Aktuelle Konditionen für 25 Jahre Laufzeit</h3>
-            <div class="run-info-grid">
-                <div class="info-item">
-                    <span class="info-label">Kreditbetrag:</span>
-                    <span class="info-value">€{latest_run['kreditbetrag']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Laufzeit:</span>
-                    <span class="info-value">{latest_run['laufzeit_jahre']} Jahre</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Kaufpreis:</span>
-                    <span class="info-value">€{latest_run['kaufpreis']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Kaufnebenkosten:</span>
-                    <span class="info-value">€{latest_run['kaufnebenkosten']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Eigenmittel:</span>
-                    <span class="info-value">€{latest_run['eigenmittel']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Haushalt Alter:</span>
-                    <span class="info-value">{latest_run['haushalt_alter']} Jahre</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Netto-Einkommen:</span>
-                    <span class="info-value">€{latest_run['haushalt_einkommen']:,.2f}/Monat</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Wohnnutzfläche:</span>
-                    <span class="info-value">{latest_run['haushalt_nutzflaeche']} m²</span>
-                </div>
-            </div>
-        </div>
-        
         <div class="table-container">
             <h2 style="color: #2c3e50; margin-bottom: 20px;">📋 Finanzierungsdetails - Aktuelle Konditionen für 25 Jahre Laufzeit</h2>
             <table>
@@ -1438,6 +1537,44 @@ def generate_email_html(png_base64):
             </table>
         </div>
         
+        <div class="run-info">
+            <h3>📊 Parameter für 25 Jahre Laufzeit</h3>
+            <div class="run-info-grid">
+                <div class="info-item">
+                    <span class="info-label">Kreditbetrag:</span>
+                    <span class="info-value">€{latest_run['kreditbetrag']:,.0f}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Laufzeit:</span>
+                    <span class="info-value">{latest_run['laufzeit_jahre']} Jahre</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Kaufpreis:</span>
+                    <span class="info-value">€{latest_run['kaufpreis']:,.0f}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Kaufnebenkosten:</span>
+                    <span class="info-value">€{latest_run['kaufnebenkosten']:,.0f}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Eigenmittel:</span>
+                    <span class="info-value">€{latest_run['eigenmittel']:,.0f}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Haushalt Alter:</span>
+                    <span class="info-value">{latest_run['haushalt_alter']} Jahre</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Netto-Einkommen:</span>
+                    <span class="info-value">€{latest_run['haushalt_einkommen']:,.2f}/Monat</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Wohnnutzfläche:</span>
+                    <span class="info-value">{latest_run['haushalt_nutzflaeche']} m²</span>
+                </div>
+            </div>
+        </div>
+        
         <div class="timestamp">
             Last Updated: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}<br>
             Data Source: Housing Loan Database | Latest Run ID: {latest_run['id']}<br>
@@ -1451,7 +1588,7 @@ def generate_email_html(png_base64):
     with open(HTML_EMAIL_PATH, 'w', encoding='utf-8') as f:
         f.write(html_content)
     
-    print(f"✓ Email HTML page generated: {HTML_EMAIL_PATH}")
+    print(f"[OK] Email HTML page generated: {HTML_EMAIL_PATH}")
     return True
 
 
@@ -1468,38 +1605,38 @@ if __name__ == "__main__":
     conn.close()
     
     if not view_exists:
-        print("⚠️  View 'housing_loan_chart_ready' does not exist!")
+        print("[WARN] View 'housing_loan_chart_ready' does not exist!")
         print("   Please run: python3 create_housing_loan_view.py")
         exit(1)
     
     # Generate interactive HTML (for website)
-    print("📄 Generating interactive HTML for web...")
+    print("[INFO] Generating interactive HTML for web...")
     success, png_base64 = generate_html()
     
     if success:
-        print("\n✅ Interactive HTML report generated successfully!")
-        print(f"   📄 Web HTML: {HTML_PATH}")
-        print(f"   🖼️  Chart PNG: {CHART_PNG_PATH}")
+        print("\n[SUCCESS] Interactive HTML report generated successfully!")
+        print(f"   [FILE] Web HTML: {HTML_PATH}")
+        print(f"   [FILE] Chart PNG: {CHART_PNG_PATH}")
         
         # Generate email HTML (with static PNG)
-        print("\n📧 Generating email-friendly HTML...")
+        print("\n[INFO] Generating email-friendly HTML...")
         email_success = generate_email_html(png_base64)
         
         if email_success:
-            print("\n✅ Email HTML report generated successfully!")
-            print(f"   📧 Email HTML: {HTML_EMAIL_PATH}")
+            print("\n[SUCCESS] Email HTML report generated successfully!")
+            print(f"   [FILE] Email HTML: {HTML_EMAIL_PATH}")
         else:
-            print("\n⚠️  Email HTML generation failed (continuing anyway)")
+            print("\n[WARN] Email HTML generation failed (continuing anyway)")
         
         print(f"\n   Open in browser: file://{HTML_PATH.absolute()}")
-        print("\n   🎯 Web Version Features:")
+        print("\n   [FEATURES] Web Version Features:")
         print("      • Laufzeit dropdown filter (All, 15, 20, 25, 30 Jahre)")
         print("      • Toggle Zinssatz / Effektiver Zinssatz")
         print("      • Interactive legend (click to show/hide)")
         print("      • Zoom, pan, hover for details")
-        print("\n   📧 Email Version Features:")
+        print("\n   [FEATURES] Email Version Features:")
         print("      • Static PNG chart (works in all email clients)")
         print("      • No JavaScript required")
         print("      • Embedded base64 image")
     else:
-        print("\n❌ HTML generation failed!")
+        print("\n[ERROR] HTML generation failed!")

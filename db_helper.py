@@ -3,12 +3,13 @@ Database helper module for storing durchblicker.at scraping results
 """
 
 import sqlite3
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
-
-DB_PATH = Path("/opt/Bankcomparison/austrian_banks_housing_loan.db")
+# Get database path from environment or use relative path
+DB_PATH = Path(os.getenv('HOUSING_LOAN_DB_PATH', 'austrian_banks_housing_loan.db'))
 
 
 def create_database(db_path: Path = DB_PATH) -> None:
@@ -299,6 +300,230 @@ def print_database_summary(db_path: Path = DB_PATH) -> None:
         print(f"  Laufzeit: {latest_run[3]} Jahre")
     
     print("="*60 + "\n")
+
+
+def get_all_loan_offers(db_path: Path = DB_PATH) -> List[Dict[str, Any]]:
+    """
+    Retrieve all user loan offers from loan_offers table and parse German formats.
+    
+    Converts:
+    - angebotsdatum: "DD.MM.YYYY" → datetime
+    - fixzinssatz: "2,650%" → 2.65
+    - effektivzinssatz: "3,30%" → 3.30
+    
+    Returns:
+        List of dictionaries with parsed data:
+        {
+            'anbieter': str,
+            'angebotsdatum': datetime,
+            'fixzinssatz': float,
+            'effektivzinssatz': float,
+            'laufzeit': str,
+            'fileName': str
+        }
+    """
+    import re
+    
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Query all loan offers
+    cursor.execute("""
+        SELECT anbieter, angebotsdatum, fixzinssatz, effektivzinssatz, laufzeit, fileName
+        FROM loan_offers
+        WHERE angebotsdatum IS NOT NULL 
+          AND fixzinssatz IS NOT NULL 
+          AND effektivzinssatz IS NOT NULL
+        ORDER BY angebotsdatum DESC
+    """)
+    
+    rows = cursor.fetchall()
+    
+    offers = []
+    for row in rows:
+        offer_dict = dict(row)
+        
+        # Parse date: "DD.MM.YYYY" → datetime
+        try:
+            date_str = offer_dict['angebotsdatum']
+            parsed_date = datetime.strptime(date_str, '%d.%m.%Y')
+            offer_dict['angebotsdatum'] = parsed_date
+        except (ValueError, TypeError) as e:
+            print(f"[WARN] Could not parse date '{offer_dict['angebotsdatum']}': {e}")
+            continue
+        
+        # Parse fixzinssatz: "2,650%" → 2.65 (handle "2,950% p.a." format)
+        try:
+            fix_str = offer_dict['fixzinssatz']
+            # Remove % sign and 'p.a.' text, replace comma with dot
+            fix_str = fix_str.replace('%', '').replace('p.a.', '').replace(',', '.').strip()
+            offer_dict['fixzinssatz'] = float(fix_str)
+        except (ValueError, AttributeError) as e:
+            print(f"[WARN] Could not parse fixzinssatz '{offer_dict['fixzinssatz']}': {e}")
+            continue
+        
+        # Parse effektivzinssatz: "3,30%" → 3.30 (handle "p.a." format)
+        try:
+            eff_str = offer_dict.get('effektivzinssatz', '')
+            # Remove % sign and 'p.a.' text, replace comma with dot
+            eff_str = eff_str.replace('%', '').replace('p.a.', '').replace(',', '.').strip()
+            offer_dict['effektivzinssatz'] = float(eff_str) if eff_str else None
+        except (ValueError, AttributeError) as e:
+            print(f"[WARN] Could not parse effektivzinssatz '{offer_dict.get('effektivzinssatz')}': {e}")
+            continue
+        
+        # Parse laufzeit: "30 Jahre" → 30 (extract numeric value)
+        try:
+            laufzeit_str = offer_dict.get('laufzeit', '')
+            if laufzeit_str:
+                # Extract number from string like "30 Jahre" or "25 Jahre"
+                import re
+                match = re.search(r'(\d+)', laufzeit_str)
+                if match:
+                    offer_dict['laufzeit_numeric'] = int(match.group(1))
+                else:
+                    offer_dict['laufzeit_numeric'] = None
+            else:
+                offer_dict['laufzeit_numeric'] = None
+        except (ValueError, AttributeError) as e:
+            print(f"[WARN] Could not parse laufzeit '{offer_dict.get('laufzeit')}': {e}")
+            offer_dict['laufzeit_numeric'] = None
+        
+        offers.append(offer_dict)
+    
+    conn.close()
+    
+    print(f"[INFO] Retrieved {len(offers)} user loan offers from database")
+    return offers
+
+
+def get_loan_offers_by_anbieter(db_path: Path = DB_PATH) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Get all loan offers grouped by anbieter (bank/provider).
+    
+    Returns:
+        Dictionary mapping anbieter → list of offers
+    """
+    offers = get_all_loan_offers(db_path)
+    
+    by_anbieter = {}
+    for offer in offers:
+        anbieter = offer.get('anbieter', 'Unknown')
+        if anbieter not in by_anbieter:
+            by_anbieter[anbieter] = []
+        by_anbieter[anbieter].append(offer)
+    
+    return by_anbieter
+
+
+# ============================================================================
+# CONSUMER LOAN FUNCTIONS
+# ============================================================================
+
+CONSUMER_DB_PATH = Path(os.getenv('CONSUMER_LOAN_DB_PATH', 'austrian_banks.db'))
+
+
+def create_consumer_loan_database(db_path: Path = CONSUMER_DB_PATH) -> None:
+    """
+    Create the consumer loan database with interest_rates table
+    This matches the schema used by austrian_bankscraper_linux.py
+    """
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS interest_rates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bank_name TEXT,
+            product_name TEXT,
+            rate TEXT,
+            currency TEXT,
+            date_scraped TIMESTAMP,
+            source_url TEXT,
+            nettokreditbetrag TEXT,
+            gesamtbetrag TEXT,
+            vertragslaufzeit TEXT,
+            effektiver_jahreszins TEXT,
+            monatliche_rate TEXT,
+            min_betrag TEXT,
+            max_betrag TEXT,
+            min_laufzeit TEXT,
+            max_laufzeit TEXT,
+            full_text TEXT
+        )
+    """)
+    
+    # Create index for faster queries
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_scrape_date 
+        ON interest_rates(date_scraped)
+    """)
+    
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_bank_name 
+        ON interest_rates(bank_name)
+    """)
+    
+    conn.commit()
+    conn.close()
+    
+    print(f"[INFO] Consumer loan database created/verified at: {db_path}")
+
+
+def get_consumer_loan_runs(db_path: Path = CONSUMER_DB_PATH) -> List[Dict[str, Any]]:
+    """
+    Retrieve all consumer loan scraping runs
+    Returns list of dictionaries with all interest_rates entries
+    """
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT * FROM interest_rates 
+        ORDER BY date_scraped DESC
+    """)
+    
+    runs = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return runs
+
+
+def parse_german_number(value: str) -> Optional[float]:
+    """
+    Parse German number format to float
+    Handles: "2,650%" → 2.65, "1.234,56" → 1234.56
+    """
+    if not value or value == "-":
+        return None
+    
+    try:
+        # Remove % sign and 'p.a.' text, replace comma with dot
+        value = value.replace('%', '').replace('p.a.', '').replace(',', '.').strip()
+        # Remove any remaining dots (thousand separators)
+        value = value.replace('.', '', value.count('.') - 1) if value.count('.') > 1 else value
+        return float(value)
+    except (ValueError, AttributeError):
+        return None
+
+
+def parse_german_date(date_str: str) -> Optional[datetime]:
+    """
+    Parse German date format to datetime
+    Handles: "DD.MM.YYYY" → datetime
+    """
+    if not date_str:
+        return None
+    
+    try:
+        return datetime.strptime(date_str, '%d.%m.%Y')
+    except ValueError:
+        try:
+            return datetime.fromisoformat(date_str)
+        except ValueError:
+            return None
 
 
 if __name__ == "__main__":

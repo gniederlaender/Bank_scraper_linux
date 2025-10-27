@@ -4,11 +4,19 @@ Create a database view with cleaned numeric data for housing loan charting
 """
 
 import sqlite3
+import os
+from pathlib import Path
 
-def create_housing_loan_chart_view():
+# Get database path from environment or use relative path
+DB_PATH = Path(os.getenv('HOUSING_LOAN_DB_PATH', 'austrian_banks_housing_loan.db'))
+
+def create_housing_loan_chart_view(db_path: Path = None):
     """Create a view with cleaned numeric data for charting housing loan variations"""
     
-    conn = sqlite3.connect('/opt/Bankcomparison/austrian_banks_housing_loan.db')
+    if db_path is None:
+        db_path = DB_PATH
+    
+    conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
     
     print("Creating housing loan chart-ready view...")
@@ -90,12 +98,12 @@ def create_housing_loan_chart_view():
     try:
         cursor.execute(create_view_sql)
         conn.commit()
-        print("✓ View 'housing_loan_chart_ready' created successfully!")
+        print("[OK] View 'housing_loan_chart_ready' created successfully!")
         
         # Test the view with a sample query
         cursor.execute("SELECT COUNT(*) FROM housing_loan_chart_ready")
         count = cursor.fetchone()[0]
-        print(f"✓ View contains {count} records")
+        print(f"[OK] View contains {count} records")
         
         # Show sample of cleaned data
         cursor.execute("""
@@ -121,7 +129,7 @@ def create_housing_loan_chart_view():
         print("-" * 100)
         
     except Exception as e:
-        print(f"✗ Error creating view: {e}")
+        print(f"[ERROR] Error creating view: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -133,8 +141,9 @@ def create_housing_loan_chart_view():
 if __name__ == "__main__":
     success = create_housing_loan_chart_view()
     if success:
-        print("\n✅ View creation completed successfully!")
+        print("\n[SUCCESS] View creation completed successfully!")
+        print(f"   Database: {DB_PATH}")
         print("   You can now generate charts using this view.")
     else:
-        print("\n❌ View creation failed!")
+        print("\n[FAILED] View creation failed!")
 

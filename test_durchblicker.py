@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import os
 import time
 from datetime import datetime
 import re
@@ -10,8 +11,9 @@ from typing import Dict, List, Any, Optional
 from playwright.sync_api import Playwright, sync_playwright, TimeoutError as PlaywrightTimeoutError
 from db_helper import save_scraping_data
 
-
-SCREENSHOTS_DIR = Path("/opt/Bankcomparison/screenshots")
+# Get screenshot directory from environment or use relative path
+BASE_DIR = Path(os.getenv('BANKCOMPARISON_BASE_DIR', '.'))
+SCREENSHOTS_DIR = Path(os.getenv('SCREENSHOTS_DIR', BASE_DIR / 'screenshots'))
 
 
 def ensure_dirs() -> None:

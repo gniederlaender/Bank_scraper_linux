@@ -14,10 +14,13 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import glob
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Try to load dotenv if available (optional for test mode)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not available, will use environment variables
 
 # Configure logging
 logging.basicConfig(
@@ -121,13 +124,13 @@ class EmailReportSender:
                 server.login(self.email_user, self.email_password)
                 server.send_message(msg)
             
-            logger.info(f"✅ Email sent successfully to {', '.join(self.email_recipients)}")
+            logger.info(f"Email sent successfully to {', '.join(self.email_recipients)}")
             logger.info(f"   Subject: {subject}")
             logger.info(f"   HTML file: {html_file_path}")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Error sending email: {e}")
+            logger.error(f"Error sending email: {e}")
             return False
     
     def _add_screenshot_attachments(self, msg):
@@ -214,6 +217,12 @@ Examples:
         help='Include screenshot attachments from ./screenshots directory'
     )
     
+    parser.add_argument(
+        '--test',
+        action='store_true',
+        help='Test mode: Validate configuration without sending email'
+    )
+    
     args = parser.parse_args()
     
     # Display header
@@ -222,6 +231,46 @@ Examples:
     logger.info("=" * 60)
     
     try:
+        # Check if HTML file exists
+        if not os.path.exists(args.html_file):
+            logger.error(f"HTML file not found: {args.html_file}")
+            sys.exit(1)
+        
+        # Test mode: Just validate configuration without sending
+        if args.test:
+            logger.info("TEST MODE: Validating configuration (no email will be sent)...")
+            logger.info("=" * 60)
+            
+            # Check email configuration
+            logger.info("Checking email configuration...")
+            try:
+                sender = EmailReportSender(report_type=args.type)
+                
+                # Read and validate HTML content
+                logger.info(f"\nReading HTML file: {args.html_file}")
+                with open(args.html_file, 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+                    logger.info(f"HTML file is valid ({len(html_content)} characters)")
+                
+                logger.info("\n" + "=" * 60)
+                logger.info("[TEST MODE] Configuration is valid!")
+                logger.info("=" * 60)
+                logger.info(f"EMAIL_HOST: {sender.email_host}")
+                logger.info(f"EMAIL_PORT: {sender.email_port}")
+                logger.info(f"EMAIL_USER: {sender.email_user}")
+                logger.info(f"Recipients: {', '.join(sender.email_recipients)}")
+                logger.info(f"HTML file: {args.html_file} ({len(html_content)} chars)")
+                logger.info("=" * 60)
+                logger.info("To send email, run without --test flag")
+                sys.exit(0)
+            except ValueError as e:
+                logger.error("\n[TEST MODE] Configuration incomplete:")
+                logger.error(f"  {e}")
+                logger.error("\nTo use test mode, you need a .env file or set environment variables:")
+                logger.error("  EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASSWORD, EMAIL_RECIPIENTS")
+                logger.info("\nHowever, you can still use the script without .env file if you set these as environment variables.")
+                sys.exit(1)
+        
         # Create sender and send email
         sender = EmailReportSender(report_type=args.type)
         success = sender.send_report(
@@ -232,12 +281,12 @@ Examples:
         
         if success:
             logger.info("=" * 60)
-            logger.info("✅ Email sent successfully!")
+            logger.info("Email sent successfully!")
             logger.info("=" * 60)
             sys.exit(0)
         else:
             logger.error("=" * 60)
-            logger.error("❌ Failed to send email")
+            logger.error("Failed to send email")
             logger.error("=" * 60)
             sys.exit(1)
     
