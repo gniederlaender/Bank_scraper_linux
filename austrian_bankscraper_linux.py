@@ -925,8 +925,8 @@ class AustrianBankScraper:
             
             logger.info("Comparison HTML file generated successfully")
             
-            # Send email with the HTML content
-            self.send_email(html_content)
+            # Send email with the HTML content (DISABLED)
+            # self.send_email(html_content)
             
         except Exception as e:
             logger.error(f"Error generating comparison HTML: {str(e)}")

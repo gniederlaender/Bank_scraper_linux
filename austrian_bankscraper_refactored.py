@@ -1200,9 +1200,9 @@ class ScraperOrchestrator:
             self.db_manager.export_to_excel()
             html_content = self.report_generator.generate_html_report()
             
-            # Send email report
-            if html_content:
-                self.email_service.send_report(html_content)
+            # Send email report (DISABLED)
+            # if html_content:
+            #     self.email_service.send_report(html_content)
             
             logger.info("Scraping process completed successfully")
             
