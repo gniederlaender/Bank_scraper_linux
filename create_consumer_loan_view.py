@@ -8,6 +8,13 @@ import sqlite3
 import os
 from pathlib import Path
 
+# Try to load dotenv if available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not available, will use environment variables
+
 # Get database path from environment or use relative path
 DB_PATH = Path(os.getenv('CONSUMER_LOAN_DB_PATH', 'austrian_banks.db'))
 

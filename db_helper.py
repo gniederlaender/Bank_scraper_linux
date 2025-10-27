@@ -8,6 +8,13 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
+# Try to load dotenv if available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not available, will use environment variables
+
 # Get database path from environment or use relative path
 DB_PATH = Path(os.getenv('HOUSING_LOAN_DB_PATH', 'austrian_banks_housing_loan.db'))
 

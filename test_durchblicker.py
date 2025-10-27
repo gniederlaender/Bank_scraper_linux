@@ -11,6 +11,13 @@ from typing import Dict, List, Any, Optional
 from playwright.sync_api import Playwright, sync_playwright, TimeoutError as PlaywrightTimeoutError
 from db_helper import save_scraping_data
 
+# Try to load dotenv if available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not available, will use environment variables
+
 # Get screenshot directory from environment or use relative path
 BASE_DIR = Path(os.getenv('BANKCOMPARISON_BASE_DIR', '.'))
 SCREENSHOTS_DIR = Path(os.getenv('SCREENSHOTS_DIR', BASE_DIR / 'screenshots'))

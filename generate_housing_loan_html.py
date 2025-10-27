@@ -19,6 +19,13 @@ import matplotlib.dates as mdates
 
 from db_helper import get_all_loan_offers
 
+# Try to load dotenv if available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not available, will use environment variables
+
 # Get paths from environment or use relative paths
 BASE_DIR = Path(os.getenv('BANKCOMPARISON_BASE_DIR', '.'))
 DB_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_DB_PATH', 'austrian_banks_housing_loan.db')

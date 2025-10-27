@@ -17,6 +17,13 @@ matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
+# Try to load dotenv if available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not available, will use environment variables
+
 # Get paths from environment or use relative paths
 BASE_DIR = Path(os.getenv('BANKCOMPARISON_BASE_DIR', '.'))
 DB_PATH = BASE_DIR / os.getenv('CONSUMER_LOAN_DB_PATH', 'austrian_banks.db')
