@@ -70,7 +70,8 @@ def generate_interactive_chart():
         'raiffeisen': '#1f77b4',   # Blue
         'bawag': '#ff7f0e',          # Orange
         'bank99': '#2ca02c',         # Green
-        'erste': '#d62728'           # Red
+        'erste': '#d62728',          # Red
+        'santander': '#9467bd'       # Purple
     }
     
     # Get unique banks
@@ -463,10 +464,173 @@ def generate_html():
             padding-top: 20px;
             border-top: 2px solid #ecf0f1;
         }}
+        @media (max-width: 768px) {{
+            body {{
+                margin: 0;
+                padding: 5px;
+            }}
+            .container {{
+                margin: 0;
+                padding: 10px;
+                border-radius: 0;
+                box-shadow: none;
+            }}
+            h1 {{
+                font-size: 1.4em;
+                margin-bottom: 15px;
+            }}
+            .subtitle {{
+                font-size: 0.9em;
+                margin-bottom: 20px;
+            }}
+            .chart-container {{
+                padding: 15px;
+                margin-bottom: 20px;
+            }}
+            .chart-controls {{
+                flex-direction: column;
+                gap: 15px;
+                padding: 12px;
+            }}
+            .control-group {{
+                width: 100%;
+                justify-content: space-between;
+                gap: 10px;
+            }}
+            .control-label {{
+                font-size: 13px;
+            }}
+            button {{
+                padding: 8px 10px;
+                font-size: 13px;
+                min-height: 36px;
+                flex: 1;
+            }}
+            /* Plotly chart mobile adjustments */
+            #plotly-chart {{
+                height: 400px !important;
+            }}
+            .js-plotly-plot .plotly .modebar {{
+                display: none !important;
+            }}
+            .js-plotly-plot .plotly .legend {{
+                display: none !important;
+            }}
+            table {{
+                font-size: 11px;
+                min-width: 500px;
+            }}
+            th, td {{
+                padding: 8px 4px;
+                white-space: nowrap;
+            }}
+            .table-container {{
+                margin-bottom: 20px;
+            }}
+            .timestamp {{
+                font-size: 0.8em;
+                margin-top: 20px;
+                padding-top: 15px;
+            }}
+        }}
+        @media (max-width: 480px) {{
+            body {{
+                padding: 2px;
+            }}
+            .container {{
+                padding: 5px;
+            }}
+            h1 {{
+                font-size: 1.2em;
+            }}
+            .chart-container {{
+                padding: 10px;
+            }}
+            .chart-controls {{
+                padding: 8px;
+            }}
+            .control-group {{
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+            }}
+            .control-label {{
+                text-align: center;
+            }}
+            button {{
+                width: 100%;
+                margin: 2px 0;
+            }}
+            #plotly-chart {{
+                height: 300px !important;
+            }}
+            table {{
+                font-size: 10px;
+                min-width: 450px;
+            }}
+            th, td {{
+                padding: 6px 2px;
+            }}
+        }}
+        .nav-tabs {{
+            display: flex;
+            gap: 0;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #ecf0f1;
+            background-color: #f8f9fa;
+            border-radius: 8px 8px 0 0;
+            overflow: hidden;
+        }}
+        .nav-tab {{
+            flex: 1;
+            padding: 15px 20px;
+            text-align: center;
+            background-color: #e8ecef;
+            color: #495057;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1.1em;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+        }}
+        .nav-tab:hover {{
+            background-color: #dee2e6;
+            color: #212529;
+            text-decoration: none;
+        }}
+        .nav-tab.active {{
+            background-color: white;
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+        }}
+        .nav-tab:first-child {{
+            border-right: 1px solid #dee2e6;
+        }}
+        @media (max-width: 768px) {{
+            .nav-tabs {{
+                margin-bottom: 20px;
+            }}
+            .nav-tab {{
+                padding: 12px 10px;
+                font-size: 0.95em;
+            }}
+        }}
+        @media (max-width: 480px) {{
+            .nav-tab {{
+                padding: 10px 8px;
+                font-size: 0.85em;
+            }}
+        }}
     </style>
 </head>
 <body>
     <div class="container">
+        <div class="nav-tabs">
+            <a href="bank_comparison_housing_loan_durchblicker.html" class="nav-tab">🏠 Housing Loans</a>
+            <a href="#" class="nav-tab active">🏦 Consumer Loans</a>
+        </div>
         <h1>🏦 Consumer Loan Comparison</h1>
         <div class="subtitle">Konsumkredit - Interaktive Zinsentwicklung</div>
         
@@ -516,6 +680,41 @@ def generate_html():
                     
                     applyFilters();
                 }}
+                
+                // Mobile responsiveness for Plotly chart
+                function handleResize() {{
+                    const chartDiv = document.getElementById('plotly-chart');
+                    if (chartDiv && chartDiv.data) {{
+                        const isMobile = window.innerWidth <= 768;
+                        const isSmallMobile = window.innerWidth <= 480;
+                        
+                        let newHeight = 600;
+                        let newMargin = {{l: 80, r: 280, t: 80, b: 80}};
+                        let showLegend = true;
+                        
+                        if (isSmallMobile) {{
+                            newHeight = 300;
+                            newMargin = {{l: 50, r: 50, t: 60, b: 60}};
+                            showLegend = false;
+                        }} else if (isMobile) {{
+                            newHeight = 400;
+                            newMargin = {{l: 60, r: 60, t: 70, b: 70}};
+                            showLegend = false;
+                        }}
+                        
+                        Plotly.relayout('plotly-chart', {{
+                            height: newHeight,
+                            margin: newMargin,
+                            showlegend: showLegend
+                        }});
+                    }}
+                }}
+                
+                // Add resize listener
+                window.addEventListener('resize', handleResize);
+                
+                // Initial resize check
+                setTimeout(handleResize, 1000);
                 
                 // Apply initial filters
                 setTimeout(() => {{

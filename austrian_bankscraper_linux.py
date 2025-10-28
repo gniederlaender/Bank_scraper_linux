@@ -69,6 +69,10 @@ class AustrianBankScraper:
             'erste': {
                 'url': 'https://www.erstebank.at/at/de/privatkunden/kredite/rundumkredit.html',
                 'interest_rates_url': 'https://shop.sparkasse.at/storeconsumerloan/rest/emilcalculators/198'
+            },
+            'santander': {
+                'url': 'https://www.santanderconsumer.at/',
+                'interest_rates_url': 'https://website-public-api.santanderconsumer.at/api/public'
             }
         }
         
@@ -105,6 +109,14 @@ class AustrianBankScraper:
                 'vertragslaufzeit': 'startDuration',
                 'gesamtbetrag': None,
                 'monatliche_rate': 'installment'
+            },
+            'santander': {
+                'sollzinssatz': 'nominal_rate',  # API field name
+                'effektiver_jahreszins': 'effective_rate',  # API field name
+                'nettokreditbetrag': 'amount',  # API field name
+                'vertragslaufzeit': 'duration',  # API field name
+                'gesamtbetrag': 'total_amount',  # API field name
+                'monatliche_rate': 'rate'  # API field name
             }
         }
         
@@ -113,7 +125,8 @@ class AustrianBankScraper:
             'raiffeisen': True,
             'bawag': True,
             'bank99': True,
-            'erste': True
+            'erste': True,
+            'santander': True
         }
         
         self.ua = UserAgent()
@@ -545,6 +558,98 @@ class AustrianBankScraper:
                     effektiver_jahreszins,
                     monatliche_rate,
                     str(data),
+                    min_betrag, max_betrag, min_laufzeit, max_laufzeit
+                )
+            
+            elif bank_name == 'santander':
+                # Santander uses GraphQL API
+                api_url = self.banks[bank_name]['interest_rates_url']
+                
+                # Representative example: 10000 EUR, 60 months, 9.99% interest rate
+                # Note: The API requires an interest rate to be provided
+                payload = {
+                    "operationName": "calculateCashLoan",
+                    "variables": {
+                        "amount": 10000,
+                        "duration": 60,
+                        "interestRate": 9.99
+                    },
+                    "query": """query calculateCashLoan($amount: Int!, $duration: Int!, $interestRate: Float!) {
+  calculateCashLoan(
+    amount: $amount
+    duration: $duration
+    interestRate: $interestRate
+  ) {
+    amount
+    duration
+    effective_rate
+    nominal_rate
+    rate
+    total_amount
+    __typename
+  }
+}"""
+                }
+                
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                }
+                
+                sollzinssatz = effektiver_jahreszins = nettokreditbetrag = vertragslaufzeit = gesamtbetrag = monatliche_rate = None
+                min_betrag = max_betrag = min_laufzeit = max_laufzeit = None
+                
+                try:
+                    response = requests.post(api_url, json=payload, headers=headers, timeout=10)
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    if 'data' in data and 'calculateCashLoan' in data['data']:
+                        result = data['data']['calculateCashLoan']
+                        mapping = self.field_mapping[bank_name]
+                        
+                        # Extract values from API response
+                        sollzinssatz_raw = result.get(mapping['sollzinssatz'])
+                        effektiver_jahreszins_raw = result.get(mapping['effektiver_jahreszins'])
+                        nettokreditbetrag_raw = result.get(mapping['nettokreditbetrag'])
+                        vertragslaufzeit_raw = result.get(mapping['vertragslaufzeit'])
+                        gesamtbetrag_raw = result.get(mapping['gesamtbetrag'])
+                        monatliche_rate_raw = result.get(mapping['monatliche_rate'])
+                        
+                        # Format values to match other banks
+                        sollzinssatz = f"{sollzinssatz_raw:.2f} %" if sollzinssatz_raw is not None else None
+                        effektiver_jahreszins = f"{effektiver_jahreszins_raw:.2f} %" if effektiver_jahreszins_raw is not None else None
+                        nettokreditbetrag = f"{int(nettokreditbetrag_raw):,} EUR" if nettokreditbetrag_raw is not None else None
+                        vertragslaufzeit = f"{int(vertragslaufzeit_raw)} Monate" if vertragslaufzeit_raw is not None else None
+                        gesamtbetrag = f"{float(gesamtbetrag_raw):,.2f} EUR" if gesamtbetrag_raw is not None else None
+                        monatliche_rate = f"{float(monatliche_rate_raw):,.2f} EUR" if monatliche_rate_raw is not None else None
+                        
+                        logger.info(f"Santander API response extracted - nominal_rate: {sollzinssatz}, effective_rate: {effektiver_jahreszins}, amount: {nettokreditbetrag}, duration: {vertragslaufzeit}, total_amount: {gesamtbetrag}, rate: {monatliche_rate}")
+                    else:
+                        logger.error(f"Santander API returned unexpected structure: {data}")
+                        if 'errors' in data:
+                            logger.error(f"Santander API errors: {data['errors']}")
+                
+                except Exception as e:
+                    logger.error(f"Error making API call for Santander: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                
+                # Store the extracted fields in the database
+                # Note: min/max values not available from API, set to None for now
+                self.store_interest_rate(
+                    bank_name,
+                    'Representative Example',
+                    sollzinssatz,
+                    'EUR',
+                    api_url,
+                    nettokreditbetrag,
+                    gesamtbetrag,
+                    vertragslaufzeit,
+                    effektiver_jahreszins,
+                    monatliche_rate,
+                    f"API Response: {response.text if 'response' in locals() else 'No response'}",
                     min_betrag, max_betrag, min_laufzeit, max_laufzeit
                 )
             

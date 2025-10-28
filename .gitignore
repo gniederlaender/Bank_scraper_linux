@@ -63,3 +63,9 @@ success.png
 # OS specific files
 .DS_Store
 Thumbs.db 
+
+# Generated HTML reports - do not track
+bank_comparison_housing_loan_durchblicker.html
+bank_comparison_housing_loan_durchblicker_email.html
+bank_comparison_consumer_loan.html
+bank_comparison_consumer_loan_email.html

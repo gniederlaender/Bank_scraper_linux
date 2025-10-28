@@ -795,10 +795,65 @@ def generate_html():
                 padding: 6px 2px;
             }}
         }}
+        .nav-tabs {{
+            display: flex;
+            gap: 0;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #ecf0f1;
+            background-color: #f8f9fa;
+            border-radius: 8px 8px 0 0;
+            overflow: hidden;
+        }}
+        .nav-tab {{
+            flex: 1;
+            padding: 15px 20px;
+            text-align: center;
+            background-color: #e8ecef;
+            color: #495057;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1.1em;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+        }}
+        .nav-tab:hover {{
+            background-color: #dee2e6;
+            color: #212529;
+            text-decoration: none;
+        }}
+        .nav-tab.active {{
+            background-color: white;
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+        }}
+        .nav-tab:first-child {{
+            border-right: 1px solid #dee2e6;
+        }}
+        @media (max-width: 768px) {{
+            .nav-tabs {{
+                margin-bottom: 20px;
+            }}
+            .nav-tab {{
+                padding: 12px 10px;
+                font-size: 0.95em;
+            }}
+        }}
+        @media (max-width: 480px) {{
+            .nav-tab {{
+                padding: 10px 8px;
+                font-size: 0.85em;
+            }}
+        }}
     </style>
 </head>
 <body>
     <div class="container">
+        <div class="nav-tabs">
+            <a href="#" class="nav-tab active">🏠 Housing Loans</a>
+            <a href="bank_comparison_consumer_loan.html" class="nav-tab">🏦 Consumer Loans</a>
+        </div>
         <h1>🏠 Housing Loan Comparison</h1>
         
         <div class="chart-container">
