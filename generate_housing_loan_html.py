@@ -171,6 +171,8 @@ def generate_interactive_chart():
                 anbieter = offer['anbieter']
                 date = offer['angebotsdatum']
                 laufzeit_numeric = offer.get('laufzeit_numeric')  # Get parsed laufzeit
+                fixzins_years = offer.get('fixzinssatz_in_jahren_numeric')
+                fixzins_display = offer.get('fixzinssatz_in_jahren_display') or "n/a"
                 
                 # Get color for this anbieter
                 color = colors_user.get(anbieter, default_colors[i % len(default_colors)])
@@ -193,10 +195,11 @@ def generate_interactive_chart():
                         f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
                         f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
                         f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
+                        f'Fixzinsperiode: {fixzins_display}<br>'
                         '<extra></extra>'
                     ),
                     visible=False,  # Hidden by default
-                    customdata=[[laufzeit_numeric, 'user_offer_fix', None]]
+                    customdata=[[laufzeit_numeric, 'user_offer_fix', fixzins_years]]
                 ))
                 
                 # Trace for effektivzinssatz
@@ -214,10 +217,11 @@ def generate_interactive_chart():
                         f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
                         f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
                         f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
+                        f'Fixzinsperiode: {fixzins_display}<br>'
                         '<extra></extra>'
                     ),
                     visible=False,  # Hidden by default
-                    customdata=[[laufzeit_numeric, 'user_offer_eff', None]]
+                    customdata=[[laufzeit_numeric, 'user_offer_eff', fixzins_years]]
                 ))
                 
     except Exception as e:

@@ -74,10 +74,22 @@ else
 fi
 
 echo ""
+# Step 4b: Generate housing loan HTML with AI LLM commentary
+echo "Step 4b: Generating LLM housing loan commentary (beta)..."
+python3 llm_housing_commentary.py --input bank_comparison_housing_loan_durchblicker_email.html --output bank_comparison_housing_loan_durchblicker_email_commented.html
+LLM_COMMENT_EXIT=$?
+
+if [ $LLM_COMMENT_EXIT -ne 0 ]; then
+    echo "⚠️  Failed to generate LLM housing loan commentary (exit code: $LLM_COMMENT_EXIT)"
+else
+    echo "✅ LLM housing loan commentary generated!"
+fi
+
+echo ""
 
 # Step 5: Send housing loan email report
 echo "Step 5: Sending housing loan email report..."
-python3 send_email_report.py bank_comparison_housing_loan_durchblicker_email.html --type wohnkredit
+python3 send_email_report.py bank_comparison_housing_loan_durchblicker_email_commented.html --type wohnkredit
 EMAIL_EXIT=$?
 
 if [ $EMAIL_EXIT -ne 0 ]; then
@@ -152,10 +164,22 @@ else
 fi
 
 echo ""
+# Step 4b: Generate LLM commentary for consumer loan HTML email
+echo "Step 4b: Generating LLM commentary for consumer loan HTML email..."
+python3 llm_consumer_commentary.py --input bank_comparison_consumer_loan_email.html --output bank_comparison_consumer_loan_email_commented.html
+CONSUMER_LLM_COMMENTARY_EXIT=$?
+
+if [ $CONSUMER_LLM_COMMENTARY_EXIT -ne 0 ]; then
+    echo "⚠️  Failed to generate LLM commentary for consumer loan email (exit code: $CONSUMER_LLM_COMMENTARY_EXIT)"
+else
+    echo "✅ LLM commentary for consumer loan email generated!"
+fi
+
+echo ""
 
 # Step 5: Send consumer loan email report
 echo "Step 5: Sending consumer loan email report..."
-python3 send_email_report.py bank_comparison_consumer_loan_email.html --type konsumkredit
+python3 send_email_report.py bank_comparison_consumer_loan_email_commented.html --type konsumkredit
 CONSUMER_EMAIL_EXIT=$?
 
 if [ $CONSUMER_EMAIL_EXIT -ne 0 ]; then

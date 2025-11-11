@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 class EmailReportSender:
     """Handles sending email reports with HTML content and attachments"""
     
-    def __init__(self, report_type='wohnkredit'):
+    def __init__(self, report_type='wohnkredit', recipients_override=None):
         """
         Initialize email sender
         
@@ -50,13 +50,19 @@ class EmailReportSender:
         self.email_user = os.getenv('EMAIL_USER')
         self.email_password = os.getenv('EMAIL_PASSWORD')
         
-        # Select recipients based on report type
-        if report_type == 'wohnkredit':
-            recipients_str = os.getenv('EMAIL_RECIPIENTS_WOHNKREDIT', '')
+        # Select recipients
+        if recipients_override:
+            # Allow single email or comma-separated list via CLI
+            if isinstance(recipients_override, str):
+                self.email_recipients = [r.strip() for r in recipients_override.split(',') if r.strip()]
+            else:
+                self.email_recipients = [r.strip() for r in recipients_override if r.strip()]
         else:
-            recipients_str = os.getenv('EMAIL_RECIPIENTS_KONSUMKREDIT', '')
-        
-        self.email_recipients = [r.strip() for r in recipients_str.split(',') if r.strip()]
+            if report_type == 'wohnkredit':
+                recipients_str = os.getenv('EMAIL_RECIPIENTS_WOHNKREDIT', '')
+            else:
+                recipients_str = os.getenv('EMAIL_RECIPIENTS_KONSUMKREDIT', '')
+            self.email_recipients = [r.strip() for r in recipients_str.split(',') if r.strip()]
         
         # Validate configuration
         self._validate_config()
@@ -186,6 +192,12 @@ Examples:
   # Send consumer loan report
   %(prog)s bank_comparison.html --type konsumkredit
 
+  # Send to a single email (overrides .env recipients)
+  %(prog)s bank_comparison_housing_loan_durchblicker.html --type wohnkredit --to someone@example.com
+
+  # Send to multiple emails (comma-separated)
+  %(prog)s bank_comparison.html --type konsumkredit --to person1@example.com,person2@example.com
+
   # Send with custom subject
   %(prog)s report.html --type wohnkredit --subject "Custom Subject"
 
@@ -218,6 +230,11 @@ Examples:
     )
     
     parser.add_argument(
+        '--to',
+        help='Override recipients with a single email or comma-separated list (e.g., a@b.com or a@b.com,c@d.com)'
+    )
+    
+    parser.add_argument(
         '--test',
         action='store_true',
         help='Test mode: Validate configuration without sending email'
@@ -244,7 +261,7 @@ Examples:
             # Check email configuration
             logger.info("Checking email configuration...")
             try:
-                sender = EmailReportSender(report_type=args.type)
+                sender = EmailReportSender(report_type=args.type, recipients_override=args.to)
                 
                 # Read and validate HTML content
                 logger.info(f"\nReading HTML file: {args.html_file}")
@@ -271,8 +288,8 @@ Examples:
                 logger.info("\nHowever, you can still use the script without .env file if you set these as environment variables.")
                 sys.exit(1)
         
-        # Create sender and send email
-        sender = EmailReportSender(report_type=args.type)
+        # Create sender and send email (allow recipient override via --to)
+        sender = EmailReportSender(report_type=args.type, recipients_override=args.to)
         success = sender.send_report(
             html_file_path=args.html_file,
             subject=args.subject,

@@ -337,7 +337,7 @@ def get_all_loan_offers(db_path: Path = DB_PATH) -> List[Dict[str, Any]]:
     
     # Query all loan offers
     cursor.execute("""
-        SELECT anbieter, angebotsdatum, fixzinssatz, effektivzinssatz, laufzeit, fileName
+        SELECT anbieter, angebotsdatum, fixzinssatz, effektivzinssatz, laufzeit, fileName, fixzinssatz_in_jahren
         FROM loan_offers
         WHERE angebotsdatum IS NOT NULL 
           AND fixzinssatz IS NOT NULL 
@@ -397,6 +397,25 @@ def get_all_loan_offers(db_path: Path = DB_PATH) -> List[Dict[str, Any]]:
             print(f"[WARN] Could not parse laufzeit '{offer_dict.get('laufzeit')}': {e}")
             offer_dict['laufzeit_numeric'] = None
         
+        # Parse fixzinssatz_in_jahren: e.g. "10 Jahre" → 10.0
+        fix_jahre_raw = offer_dict.get('fixzinssatz_in_jahren')
+        fix_jahre_numeric = None
+        if fix_jahre_raw not in (None, ''):
+            try:
+                if isinstance(fix_jahre_raw, (int, float)):
+                    fix_jahre_numeric = float(fix_jahre_raw)
+                else:
+                    import re
+                    match = re.search(r'(\d+[.,]?\d*)', str(fix_jahre_raw))
+                    if match:
+                        fix_jahre_numeric = float(match.group(1).replace(',', '.'))
+            except (ValueError, TypeError):
+                fix_jahre_numeric = None
+        offer_dict['fixzinssatz_in_jahren_numeric'] = fix_jahre_numeric
+        offer_dict['fixzinssatz_in_jahren_display'] = (
+            f"{fix_jahre_numeric:g} Jahre" if fix_jahre_numeric is not None else "n/a"
+        )
+
         offers.append(offer_dict)
     
     conn.close()
