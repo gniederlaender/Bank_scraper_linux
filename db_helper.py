@@ -424,6 +424,123 @@ def get_all_loan_offers(db_path: Path = DB_PATH) -> List[Dict[str, Any]]:
     return offers
 
 
+def get_erste_bank_loan_offers(db_path: Path = DB_PATH) -> List[Dict[str, Any]]:
+    """
+    Retrieve all Erste Bank loan offers from erste_bank_loan_offers table and parse German formats.
+    
+    Converts:
+    - angebotsdatum: "DD.MM.YYYY" → datetime
+    - fixzinssatz: "2,650%" → 2.65
+    - effektivzinssatz: "3,30%" → 3.30
+    
+    Returns:
+        List of dictionaries with parsed data:
+        {
+            'anbieter': str,
+            'angebotsdatum': datetime,
+            'fixzinssatz': float,
+            'effektivzinssatz': float,
+            'laufzeit': str,
+            'fileName': str
+        }
+    """
+    import re
+    
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Query all Erste Bank loan offers
+    # Note: effektivzinssatz may be NULL, so we use fixzinssatz as fallback
+    cursor.execute("""
+        SELECT anbieter, angebotsdatum, fixzinssatz, 
+               COALESCE(effektivzinssatz, fixzinssatz) as effektivzinssatz, 
+               laufzeit, fileName, fixzinssatz_in_jahren
+        FROM erste_bank_loan_offers
+        WHERE angebotsdatum IS NOT NULL 
+          AND fixzinssatz IS NOT NULL
+        ORDER BY angebotsdatum DESC
+    """)
+    
+    rows = cursor.fetchall()
+    
+    offers = []
+    for row in rows:
+        offer_dict = dict(row)
+        
+        # Parse date: "DD.MM.YYYY" → datetime
+        try:
+            date_str = offer_dict['angebotsdatum']
+            parsed_date = datetime.strptime(date_str, '%d.%m.%Y')
+            offer_dict['angebotsdatum'] = parsed_date
+        except (ValueError, TypeError) as e:
+            print(f"[WARN] Could not parse date '{offer_dict['angebotsdatum']}': {e}")
+            continue
+        
+        # Parse fixzinssatz: "2,650%" → 2.65 (handle "2,950% p.a." format)
+        try:
+            fix_str = offer_dict['fixzinssatz']
+            # Remove % sign and 'p.a.' text, replace comma with dot
+            fix_str = fix_str.replace('%', '').replace('p.a.', '').replace(',', '.').strip()
+            offer_dict['fixzinssatz'] = float(fix_str)
+        except (ValueError, AttributeError) as e:
+            print(f"[WARN] Could not parse fixzinssatz '{offer_dict['fixzinssatz']}': {e}")
+            continue
+        
+        # Parse effektivzinssatz: "3,30%" → 3.30 (handle "p.a." format)
+        try:
+            eff_str = offer_dict.get('effektivzinssatz', '')
+            # Remove % sign and 'p.a.' text, replace comma with dot
+            eff_str = eff_str.replace('%', '').replace('p.a.', '').replace(',', '.').strip()
+            offer_dict['effektivzinssatz'] = float(eff_str) if eff_str else None
+        except (ValueError, AttributeError) as e:
+            print(f"[WARN] Could not parse effektivzinssatz '{offer_dict.get('effektivzinssatz')}': {e}")
+            continue
+        
+        # Parse laufzeit: "30 Jahre" → 30 (extract numeric value)
+        try:
+            laufzeit_str = offer_dict.get('laufzeit', '')
+            if laufzeit_str:
+                # Extract number from string like "30 Jahre" or "25 Jahre"
+                import re
+                match = re.search(r'(\d+)', laufzeit_str)
+                if match:
+                    offer_dict['laufzeit_numeric'] = int(match.group(1))
+                else:
+                    offer_dict['laufzeit_numeric'] = None
+            else:
+                offer_dict['laufzeit_numeric'] = None
+        except (ValueError, AttributeError) as e:
+            print(f"[WARN] Could not parse laufzeit '{offer_dict.get('laufzeit')}': {e}")
+            offer_dict['laufzeit_numeric'] = None
+        
+        # Parse fixzinssatz_in_jahren: e.g. "10 Jahre" → 10.0
+        fix_jahre_raw = offer_dict.get('fixzinssatz_in_jahren')
+        fix_jahre_numeric = None
+        if fix_jahre_raw not in (None, ''):
+            try:
+                if isinstance(fix_jahre_raw, (int, float)):
+                    fix_jahre_numeric = float(fix_jahre_raw)
+                else:
+                    import re
+                    match = re.search(r'(\d+[.,]?\d*)', str(fix_jahre_raw))
+                    if match:
+                        fix_jahre_numeric = float(match.group(1).replace(',', '.'))
+            except (ValueError, TypeError):
+                fix_jahre_numeric = None
+        offer_dict['fixzinssatz_in_jahren_numeric'] = fix_jahre_numeric
+        offer_dict['fixzinssatz_in_jahren_display'] = (
+            f"{fix_jahre_numeric:g} Jahre" if fix_jahre_numeric is not None else "n/a"
+        )
+
+        offers.append(offer_dict)
+    
+    conn.close()
+    
+    print(f"[INFO] Retrieved {len(offers)} Erste Bank loan offers from database")
+    return offers
+
+
 def get_loan_offers_by_anbieter(db_path: Path = DB_PATH) -> Dict[str, List[Dict[str, Any]]]:
     """
     Get all loan offers grouped by anbieter (bank/provider).

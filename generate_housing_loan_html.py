@@ -17,7 +17,7 @@ matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-from db_helper import get_all_loan_offers
+from db_helper import get_all_loan_offers, get_erste_bank_loan_offers
 
 # Try to load dotenv if available
 try:
@@ -64,7 +64,7 @@ def generate_interactive_chart():
     
     if df.empty:
         print("[WARN] No data available for chart generation")
-        return None, []
+        return None, [], [], None
     
     # Convert timestamp to datetime
     df['scrape_timestamp'] = pd.to_datetime(df['scrape_timestamp'])
@@ -227,6 +227,70 @@ def generate_interactive_chart():
     except Exception as e:
         print(f"[WARN] Could not add user offers to chart: {e}")
     
+    # Add Erste Bank loan offers if available
+    try:
+        erste_bank_offers = get_erste_bank_loan_offers()
+        
+        if erste_bank_offers:
+            print(f"[INFO] Adding {len(erste_bank_offers)} Erste Bank offers to chart...")
+            
+            # Color for Erste Bank offers
+            erste_bank_color = '#95E1D3'  # Light turquoise
+            
+            for offer in erste_bank_offers:
+                anbieter = offer['anbieter']
+                date = offer['angebotsdatum']
+                laufzeit_numeric = offer.get('laufzeit_numeric')
+                fixzins_years = offer.get('fixzinssatz_in_jahren_numeric')
+                fixzins_display = offer.get('fixzinssatz_in_jahren_display') or "n/a"
+                
+                # Trace for fixzinssatz
+                fig.add_trace(go.Scatter(
+                    x=[date],
+                    y=[offer['fixzinssatz']],
+                    mode='markers',
+                    name='Erste Bank Offer',
+                    line=dict(color=erste_bank_color, width=1),
+                    marker=dict(size=12, symbol='star', color=erste_bank_color, line=dict(width=2, color='black')),
+                    legendgroup='erste_bank_offers',
+                    hovertemplate=(
+                        f'<b>Erste Bank Offer</b><br>'
+                        'Datum: %{x|%d.%m.%Y}<br>'
+                        f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
+                        f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
+                        f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
+                        f'Fixzinsperiode: {fixzins_display}<br>'
+                        '<extra></extra>'
+                    ),
+                    visible=False,  # Hidden by default
+                    customdata=[[laufzeit_numeric, 'erste_bank_offer_fix', fixzins_years]]
+                ))
+                
+                # Trace for effektivzinssatz
+                fig.add_trace(go.Scatter(
+                    x=[date],
+                    y=[offer['effektivzinssatz']],
+                    mode='markers',
+                    name='Erste Bank Offer (Eff.)',
+                    line=dict(color=erste_bank_color, width=1),
+                    marker=dict(size=12, symbol='diamond', color=erste_bank_color, line=dict(width=2, color='black')),
+                    legendgroup='erste_bank_offers',
+                    hovertemplate=(
+                        f'<b>Erste Bank Offer</b><br>'
+                        'Datum: %{x|%d.%m.%Y}<br>'
+                        f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
+                        f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
+                        f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
+                        f'Fixzinsperiode: {fixzins_display}<br>'
+                        '<extra></extra>'
+                    ),
+                    visible=False,  # Hidden by default
+                    customdata=[[laufzeit_numeric, 'erste_bank_offer_eff', fixzins_years]]
+                ))
+                
+    except Exception as e:
+        print(f"[WARN] Could not add Erste Bank offers to chart: {e}")
+    
     # We'll use custom HTML controls instead of Plotly updatemenus for combined filtering
     # Store trace metadata for JavaScript filtering
     trace_metadata = []
@@ -309,7 +373,7 @@ def generate_interactive_chart():
         print("   (Email version will be generated without chart)")
         png_base64 = None
     
-    return chart_html, laufzeit_values, trace_metadata, png_base64
+    return chart_html, laufzeit_values, fixierung_values, trace_metadata, png_base64
 
 
 def generate_static_png_chart(df, fixierung_values, laufzeit_values, colors):
@@ -429,7 +493,7 @@ def generate_html():
     """Generate HTML page with interactive Plotly chart and data tables"""
     
     # Generate chart
-    chart_html, laufzeit_values, trace_metadata, png_base64 = generate_interactive_chart()
+    chart_html, laufzeit_values, fixierung_values, trace_metadata, png_base64 = generate_interactive_chart()
     
     if not chart_html:
         print("[WARN] No data found in database")
@@ -869,6 +933,12 @@ def generate_html():
 {f''.join([f'                        <option value="{lz}"{" selected" if lz == 25 else ""}>{lz} Jahre</option>\n' for lz in laufzeit_values])}                    </select>
                 </div>
                 <div class="control-group">
+                    <span class="control-label">Fixierung:</span>
+                    <select id="fixierung-filter">
+                        <option value="all">Alle Fixierungen</option>
+{f''.join([f'                        <option value="{fx}">{fx} Jahre</option>\n' for fx in fixierung_values])}                    </select>
+                </div>
+                <div class="control-group">
                     <span class="control-label">Anzeigen:</span>
                     <button id="btn-beide" onclick="setZinssatzFilter('beide')">Beide</button>
                     <button id="btn-zinssatz" onclick="setZinssatzFilter('zinssatz')">Nur Zinssatz</button>
@@ -877,6 +947,10 @@ def generate_html():
                 <div class="control-group">
                     <input type="checkbox" id="show-user-offers" onchange="toggleUserOffers()" />
                     <label for="show-user-offers" style="font-weight: bold; cursor: pointer;">Show Individual Offers</label>
+                </div>
+                <div class="control-group">
+                    <input type="checkbox" id="show-erste-bank-offers" onchange="toggleErsteBankOffers()" />
+                    <label for="show-erste-bank-offers" style="font-weight: bold; cursor: pointer;">Show Erste Bank Offers</label>
                 </div>
             </div>
             
@@ -891,6 +965,7 @@ def generate_html():
                 
                 // Current filter states
                 let currentLaufzeit = '25';
+                let currentFixierung = 'all';
                 let currentZinssatz = 'effektiver';
                 
                 // Apply combined filters (chart + tables)
@@ -908,6 +983,10 @@ def generate_html():
                         const isUserOffer = customdata && customdata.length > 0 && 
                                           (customdata[0][1] === 'user_offer_fix' || customdata[0][1] === 'user_offer_eff');
                         
+                        // Check if this is an Erste Bank offer
+                        const isErsteBankOffer = customdata && customdata.length > 0 && 
+                                                (customdata[0][1] === 'erste_bank_offer_fix' || customdata[0][1] === 'erste_bank_offer_eff');
+                        
                         if (isUserOffer) {{
                             // Handle user offers filtering
                             // Check if checkbox is checked
@@ -922,8 +1001,14 @@ def generate_html():
                             // Get laufzeit from customdata (first element)
                             const userLaufzeit = customdata[0][0];
                             
+                            // Get fixierung from customdata (third element)
+                            const userFixierung = customdata[0][2];
+                            
                             // Check Laufzeit filter for user offers
                             const laufzeitMatch = currentLaufzeit === 'all' || userLaufzeit === parseInt(currentLaufzeit);
+                            
+                            // Check Fixierung filter for user offers
+                            const fixierungMatch = currentFixierung === 'all' || (userFixierung !== null && userFixierung === parseFloat(currentFixierung));
                             
                             // Check Zinssatz type filter for user offers
                             let zinssatzMatch = true;
@@ -934,12 +1019,49 @@ def generate_html():
                             }}
                             // 'beide' means both are shown, so zinssatzMatch stays true
                             
-                            // Return true only if BOTH conditions match (AND logic)
-                            visible.push(laufzeitMatch && zinssatzMatch);
+                            // Return true only if ALL conditions match (AND logic)
+                            visible.push(laufzeitMatch && fixierungMatch && zinssatzMatch);
+                        }} else if (isErsteBankOffer) {{
+                            // Handle Erste Bank offers filtering (same logic as user offers)
+                            // Check if checkbox is checked
+                            const checkbox = document.getElementById('show-erste-bank-offers');
+                            const showErsteBankOffers = checkbox && checkbox.checked;
+                            
+                            if (!showErsteBankOffers) {{
+                                visible.push(false);
+                                continue;
+                            }}
+                            
+                            // Get laufzeit from customdata (first element)
+                            const ersteBankLaufzeit = customdata[0][0];
+                            
+                            // Get fixierung from customdata (third element)
+                            const ersteBankFixierung = customdata[0][2];
+                            
+                            // Check Laufzeit filter for Erste Bank offers
+                            const laufzeitMatch = currentLaufzeit === 'all' || ersteBankLaufzeit === parseInt(currentLaufzeit);
+                            
+                            // Check Fixierung filter for Erste Bank offers
+                            const fixierungMatch = currentFixierung === 'all' || (ersteBankFixierung !== null && ersteBankFixierung === parseFloat(currentFixierung));
+                            
+                            // Check Zinssatz type filter for Erste Bank offers
+                            let zinssatzMatch = true;
+                            if (currentZinssatz === 'zinssatz') {{
+                                zinssatzMatch = customdata[0][1] === 'erste_bank_offer_fix';
+                            }} else if (currentZinssatz === 'effektiver') {{
+                                zinssatzMatch = customdata[0][1] === 'erste_bank_offer_eff';
+                            }}
+                            // 'beide' means both are shown, so zinssatzMatch stays true
+                            
+                            // Return true only if ALL conditions match (AND logic)
+                            visible.push(laufzeitMatch && fixierungMatch && zinssatzMatch);
                         }} else {{
                             // Handle scraped data filtering (existing logic)
                             // Check Laufzeit filter
                             const laufzeitMatch = currentLaufzeit === 'all' || meta.laufzeit === parseInt(currentLaufzeit);
+                            
+                            // Check Fixierung filter
+                            const fixierungMatch = currentFixierung === 'all' || meta.fixierung === parseFloat(currentFixierung);
                             
                             // Check Zinssatz type filter
                             let zinssatzMatch = true;
@@ -950,8 +1072,8 @@ def generate_html():
                             }}
                             // 'beide' means both are shown, so zinssatzMatch stays true
                             
-                            // Return true only if BOTH conditions match (AND logic)
-                            visible.push(laufzeitMatch && zinssatzMatch);
+                            // Return true only if ALL conditions match (AND logic)
+                            visible.push(laufzeitMatch && fixierungMatch && zinssatzMatch);
                         }}
                     }}
                     
@@ -1041,6 +1163,12 @@ def generate_html():
                     applyFilters();
                 }});
                 
+                // Fixierung dropdown change handler
+                document.getElementById('fixierung-filter').addEventListener('change', function(e) {{
+                    currentFixierung = e.target.value;
+                    applyFilters();
+                }});
+                
                 // Zinssatz button click handler
                 function setZinssatzFilter(type) {{
                     currentZinssatz = type;
@@ -1056,6 +1184,12 @@ def generate_html():
                 
                 // Toggle user offers visibility
                 function toggleUserOffers() {{
+                    // Simply reapply all filters to respect current filter settings
+                    applyFilters();
+                }}
+                
+                // Toggle Erste Bank offers visibility
+                function toggleErsteBankOffers() {{
                     // Simply reapply all filters to respect current filter settings
                     applyFilters();
                 }}
