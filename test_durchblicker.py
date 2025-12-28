@@ -220,8 +220,8 @@ def screen1(page, laufzeit_jahre: int = 35) -> None:
     log_print("Monatliche Rate", monatliche_rate)
     log_print("Fixzins (25 Jahre)", fixzins_25)
 
-    # Screenshot
-    page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen1")), full_page=True)
+    # Screenshot disabled
+    # page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen1")), full_page=True)
 
     # Click "Jetzt berechnen"
     for name in [
@@ -362,8 +362,8 @@ def screen2(page) -> None:
         page.locator("text=Finanzierungsvorhaben").first.wait_for(state="visible", timeout=6000)
         page.locator("text=Art der Immobilie").first.wait_for(state="visible", timeout=6000)
     except Exception:
-        print("[WARN] Screen 2 markers not visible; taking debug screenshot", flush=True)
-        page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen2-debug")), full_page=True)
+        print("[WARN] Screen 2 markers not visible; debug screenshot disabled", flush=True)
+        # page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen2-debug")), full_page=True)
 
     print("[INFO] Screen 2 interactions start", flush=True)
     # First try direct known select element for Finanzierungsvorhaben
@@ -385,7 +385,7 @@ def screen2(page) -> None:
         success_fv = set_select_like(page, "Finanzierungsvorhaben", "Kauf")
     if not success_fv:
         print("[ERROR] Finanzierungsvorhaben could not be set. Aborting further steps on Screen 2.", flush=True)
-        page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen2-fv-failed")), full_page=True)
+        # page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen2-fv-failed")), full_page=True)
         return
     # Direct selects via IDs from provided page source
     try:
@@ -442,7 +442,8 @@ def screen2(page) -> None:
     print("[INFO] Screen 2 interactions done", flush=True)
 
     time.sleep(0.5)
-    page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen2")), full_page=True)
+    # Screenshot disabled
+    # page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen2")), full_page=True)
 
     for name in ["Weiter", "Nächster Schritt", "Fortfahren"]:
         try:
@@ -592,7 +593,8 @@ def screen3(page) -> None:
     print("[INFO] Screen 3 ID-based fill done", flush=True)
 
     time.sleep(0.5)
-    page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen3")), full_page=True)
+    # Screenshot disabled
+    # page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen3")), full_page=True)
 
     print("[INFO] Attempting to click Berechnen button...", flush=True)
     for name in ["Berechnen", "Jetzt berechnen", "Angebote berechnen"]:
@@ -654,45 +656,130 @@ def screen4(page, laufzeiten_to_scrape: List[int] = None) -> Dict[int, List[Dict
         """Scrape financial data specifically from the Finanzierungsdetails div element"""
         details = {}
         try:
-            # Target the specific Finanzierungsdetails div element
-            finanzierung_div = page.locator('[data-sentry-component="Finanzierungsdetails"]').first
+            # Wait for page to settle after slider change (important for dynamic content)
+            try:
+                page.wait_for_load_state("networkidle", timeout=5000)
+            except Exception:
+                pass
+            time.sleep(2)  # Additional wait for dynamic content to render
             
-            if finanzierung_div.count() == 0:
-                print("[WARN] Finanzierungsdetails div not found", flush=True)
+            # Try multiple selector strategies (fallback chain)
+            selectors = [
+                ('data-sentry-component', '[data-sentry-component="Finanzierungsdetails"]'),
+                ('text-based', 'div:has-text("Finanzierungsdetails")'),
+                ('section-heading', 'section:has(h2:has-text("Finanzierungsdetails"))'),
+                ('section-heading-alt', 'section:has(h3:has-text("Finanzierungsdetails"))'),
+                ('div-heading', 'div:has(h2:has-text("Finanzierungsdetails"))'),
+                ('content-based', 'div:has-text("Zinssatz"):has-text("Effektiver Zinssatz")'),
+            ]
+            
+            finanzierung_div = None
+            used_selector = None
+            
+            for selector_name, selector in selectors:
+                try:
+                    locator = page.locator(selector).first
+                    if locator.count() > 0:
+                        locator.wait_for(state="visible", timeout=5000)
+                        finanzierung_div = locator
+                        used_selector = selector_name
+                        print(f"[DEBUG] Found Finanzierungsdetails using: {selector_name} ({selector})", flush=True)
+                        break
+                except Exception as e:
+                    continue
+            
+            if not finanzierung_div or finanzierung_div.count() == 0:
+                print("[WARN] Finanzierungsdetails div not found with any selector", flush=True)
+                
+                # Debug: Check if text is present on page
+                try:
+                    body_text = page.locator("body").inner_text()
+                    if "Finanzierungsdetails" in body_text:
+                        print("[DEBUG] 'Finanzierungsdetails' text IS present on page, but element structure may have changed", flush=True)
+                    if "Zinssatz" in body_text:
+                        print("[DEBUG] 'Zinssatz' text IS present on page", flush=True)
+                    if "Effektiver Zinssatz" in body_text:
+                        print("[DEBUG] 'Effektiver Zinssatz' text IS present on page", flush=True)
+                except Exception:
+                    pass
+                
                 return details
             
-            # Wait for the element to be visible
-            finanzierung_div.wait_for(state="visible", timeout=10000)
+            # Try multiple strategies to find grid rows
+            grid_row_selectors = [
+                'div.grid.grid-cols-subgrid',
+                'div.grid',
+                'div[class*="grid"]',
+                'div.row',
+                'tr',  # In case it's a table
+            ]
             
-            # Get all the grid rows within the Finanzierungsdetails div
-            grid_rows = finanzierung_div.locator('div.grid.grid-cols-subgrid')
+            grid_rows = None
+            for grid_selector in grid_row_selectors:
+                try:
+                    rows = finanzierung_div.locator(grid_selector)
+                    if rows.count() > 0:
+                        grid_rows = rows
+                        print(f"[DEBUG] Found grid rows using: {grid_selector}", flush=True)
+                        break
+                except Exception:
+                    continue
             
-            print(f"[DEBUG] Found {grid_rows.count()} financial data rows", flush=True)
-            
-            # Extract data from each row
-            for i in range(grid_rows.count()):
-                row = grid_rows.nth(i)
+            if grid_rows and grid_rows.count() > 0:
+                print(f"[DEBUG] Found {grid_rows.count()} financial data rows", flush=True)
                 
-                # Get the label (first div) and value (third div with span)
-                label_div = row.locator('div').first
-                value_span = row.locator('div.text-bluegrey span').first
-                
-                if label_div.count() > 0 and value_span.count() > 0:
-                    label = label_div.inner_text().strip()
-                    value = value_span.inner_text().strip()
+                # Extract data from each row
+                for i in range(grid_rows.count()):
+                    row = grid_rows.nth(i)
                     
-                    if label and value:
-                        # Clean up the label to match our expected keys
-                        clean_label = label.replace('Anschlusskondition nach Fixzinsphase', 'Anschlusskondition')
-                        details[clean_label] = value
-                        print(f"[DEBUG] Extracted {clean_label}: {value}", flush=True)
+                    # Try multiple strategies to find label and value
+                    label_value_pairs = [
+                        # Original strategy: first div and third div with span
+                        (row.locator('div').first, row.locator('div.text-bluegrey span').first),
+                        # Alternative: first and second div
+                        (row.locator('div').first, row.locator('div').nth(1)),
+                        # Table-based: td elements
+                        (row.locator('td').first, row.locator('td').nth(1)),
+                        # Any div with text and any span
+                        (row.locator('div').first, row.locator('span').first),
+                    ]
+                    
+                    for label_loc, value_loc in label_value_pairs:
+                        try:
+                            if label_loc.count() > 0 and value_loc.count() > 0:
+                                label = label_loc.inner_text().strip()
+                                value = value_loc.inner_text().strip()
+                                
+                                if label and value and value != label:
+                                    # Clean up the label to match our expected keys
+                                    clean_label = label.replace('Anschlusskondition nach Fixzinsphase', 'Anschlusskondition')
+                                    details[clean_label] = value
+                                    print(f"[DEBUG] Extracted {clean_label}: {value}", flush=True)
+                                    break  # Found this row, move to next
+                        except Exception:
+                            continue
             
-            # Also check for any additional fields that might be in different structures
+            # Fallback: If no structured data found, try text-based extraction
             if not details:
-                print("[WARN] No data extracted from structured grid, trying fallback...", flush=True)
-                # Fallback to text-based extraction if structured approach fails
-                full_text = finanzierung_div.inner_text()
-                print(f"[DEBUG] Finanzierungsdetails text: {full_text[:500]}...", flush=True)
+                print("[WARN] No data extracted from structured grid, trying text-based fallback...", flush=True)
+                try:
+                    full_text = finanzierung_div.inner_text()
+                    print(f"[DEBUG] Finanzierungsdetails full text (first 500 chars): {full_text[:500]}...", flush=True)
+                    
+                    # Try to extract key-value pairs from text
+                    # Look for patterns like "Label: Value" or "Label\nValue"
+                    lines = full_text.split('\n')
+                    for i, line in enumerate(lines):
+                        line = line.strip()
+                        if ':' in line:
+                            parts = line.split(':', 1)
+                            if len(parts) == 2:
+                                key = parts[0].strip()
+                                val = parts[1].strip()
+                                if key and val:
+                                    details[key] = val
+                except Exception as e:
+                    print(f"[DEBUG] Text-based extraction also failed: {e}", flush=True)
                 
         except Exception as e:
             print(f"[WARN] Error scraping Finanzierungsdetails: {e}", flush=True)
@@ -783,17 +870,17 @@ def screen4(page, laufzeiten_to_scrape: List[int] = None) -> Dict[int, List[Dict
             }
             variations_data.append(variation_data)
             
-            # Take screenshot
-            screenshot_name = f"screen4_laufzeit_{laufzeit}j_fixierung_{fixierung}j"
-            page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename(screenshot_name)), full_page=True)
-            print(f"[INFO] Screenshot: {screenshot_name}", flush=True)
+            # Screenshot disabled
+            # screenshot_name = f"screen4_laufzeit_{laufzeit}j_fixierung_{fixierung}j"
+            # page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename(screenshot_name)), full_page=True)
+            # print(f"[INFO] Screenshot: {screenshot_name}", flush=True)
         
         # Store variations for this Laufzeit
         all_data_by_laufzeit[laufzeit] = variations_data
         print(f"\n[INFO] ✓ Laufzeit {laufzeit} Jahre complete: {len(variations_data)} variations captured")
     
-    # Take final screenshot
-    page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen4_final")), full_page=True)
+    # Screenshot disabled
+    # page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen4_final")), full_page=True)
     
     return all_data_by_laufzeit
 
