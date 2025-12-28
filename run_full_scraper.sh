@@ -61,8 +61,8 @@ fi
 echo "✅ Housing loan HTML generated successfully!"
 echo ""
 
-# Step 4: Copy housing loan HTML to web server
-echo "Step 4: Copying housing loan HTML to web server..."
+# Step 5: Copy housing loan HTML to web server
+echo "Step 5: Copying housing loan HTML to web server..."
 cp bank_comparison_housing_loan_durchblicker.html /var/www/smartprototypes.net/public_html/Bank_market_overview/
 COPY_EXIT=$?
 
@@ -73,9 +73,35 @@ else
     echo "✅ Housing loan HTML copied to web server!"
 fi
 
+# Step 5a: Copy screenshots directory to web server
+echo "Step 5a: Copying screenshots directory to web server..."
+if [ -d "screenshots" ]; then
+    # Create screenshots directory on web server if it doesn't exist
+    mkdir -p /var/www/smartprototypes.net/public_html/Bank_market_overview/screenshots
+    SCREENSHOTS_COPY_EXIT=$?
+    
+    if [ $SCREENSHOTS_COPY_EXIT -ne 0 ]; then
+        echo "⚠️  Failed to create screenshots directory on web server (exit code: $SCREENSHOTS_COPY_EXIT)"
+    else
+        # Copy all screenshot files
+        cp screenshots/*.png /var/www/smartprototypes.net/public_html/Bank_market_overview/screenshots/ 2>/dev/null
+        SCREENSHOTS_COPY_EXIT=$?
+        
+        if [ $SCREENSHOTS_COPY_EXIT -ne 0 ]; then
+            echo "⚠️  Failed to copy screenshots to web server (exit code: $SCREENSHOTS_COPY_EXIT)"
+            echo "   This is OK if no screenshots exist yet"
+        else
+            SCREENSHOT_COUNT=$(ls -1 screenshots/*.png 2>/dev/null | wc -l)
+            echo "✅ Screenshots directory copied to web server! ($SCREENSHOT_COUNT files)"
+        fi
+    fi
+else
+    echo "⚠️  Screenshots directory not found - skipping screenshot copy"
+fi
+
 echo ""
-# Step 4b: Generate housing loan HTML with AI LLM commentary
-echo "Step 4b: Generating LLM housing loan commentary (beta)..."
+# Step 5b: Generate housing loan HTML with AI LLM commentary
+echo "Step 5b: Generating LLM housing loan commentary (beta)..."
 python3 llm_housing_commentary.py --input bank_comparison_housing_loan_durchblicker_email.html --output bank_comparison_housing_loan_durchblicker_email_commented.html
 LLM_COMMENT_EXIT=$?
 
@@ -87,8 +113,8 @@ fi
 
 echo ""
 
-# Step 5: Send housing loan email report
-echo "Step 5: Sending housing loan email report..."
+# Step 6: Send housing loan email report
+echo "Step 6: Sending housing loan email report..."
 python3 send_email_report.py bank_comparison_housing_loan_durchblicker_email_commented.html --type wohnkredit
 EMAIL_EXIT=$?
 

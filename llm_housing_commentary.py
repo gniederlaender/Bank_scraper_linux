@@ -22,36 +22,53 @@ except ImportError as exc:  # pragma: no cover - graceful message for missing de
         "Bitte `pip install openai` ausführen."
     ) from exc
 
+from db_helper import export_housing_loan_data_json
+
 
 DEFAULT_MODEL = os.getenv("LLM_MODEL_NAME", "gpt-4o-mini")
 COMMENTARY_SECTION_ID = "llm-commentary"
 
 
-def read_html(path: Path) -> str:
-    if not path.exists():
-        raise FileNotFoundError(f"Eingabedatei nicht gefunden: {path}")
-    return path.read_text(encoding="utf-8")
+def export_database_data() -> str:
+    """
+    Export housing loan database data as JSON for LLM analysis.
+    
+    Returns:
+        JSON string with all time series data
+    """
+    try:
+        json_data = export_housing_loan_data_json()
+        return json_data
+    except Exception as e:
+        raise RuntimeError(f"Fehler beim Exportieren der Datenbankdaten: {e}")
 
 
-def request_commentary(html_content: str, model: str, max_tokens: int = 400) -> str:
+def request_commentary(json_data: str, model: str, max_tokens: int = 400) -> str:
     client = OpenAI()
 
     system_prompt = (
-        "Du bist ein Finanzanalyst für den österreichischen Hypothekenmarkt. "
-        "Du erhältst ein HTML-Dokument mit aktuellen Zinssätzen und Grafiken. "
-        "Analysiere die Entwicklung und beschreibe die ersichtlichen Veränderungen. "
-        "Einerseits geht es um die Gesamtentwicklung seit Beginn. Beschreibe diese mit maximal zwei Sätzen. "
-        "Andererseits geht es um die Veränderungen der letzten Woche. Beschreibe diese mit maximal zwei Sätzen. "
-        "Begrenze dich auf die Beschreibung der Veränderung der Zinssätze der Grafik und "
-        "gib eine kurze Zusammenfassung der aktuellen Zinssätze (höchster und niedrigster), aber gib nicht die einzelnen Zinssätze wieder."
-        "Formuliere deine Antwort prägnant auf Deutsch (maximal 80 Wörter). "
-        "Nutze Aufzählungen, wenn es die Lesbarkeit verbessert."
+        "Du bist ein erfahrener Finanzanalyst für den österreichischen Hypothekenmarkt, "
+        "der Analysen für Bankprofis erstellt. "
+        "Du erhältst strukturierte JSON-Daten mit: "
+        "1) Marktdaten (historische Zinssätze gruppiert nach Fixierung und Laufzeit), "
+        "2) Wettbewerbsangebote (tatsächliche Angebote von Konkurrenzbanken). "
+        "\n\n"
+        "Deine Analyse soll folgende Punkte abdecken: "
+        "• Marktentwicklung: Trends über den gesamten Zeitraum (kritische Beobachtungen) "
+        "• Aktuelle Marktdynamik: Veränderungen der letzten Woche (Basiswerte und Änderungen in Basispunkten) "
+        "• Konkurrenzanalyse: Gib eine Übersicht der günstigsten Konkurrenzangebote. Nur die aktuellsten Angebote. Du kannst ruhig 2 bis drei konkrete Angebote nennen."
+        "\n\n"
+        "Stil: Präzise, faktenbasiert, für Bankprofis. Verwende Fachbegriffe korrekt. "
+        "Wenn du über Zinssätze berichtest, sage immer dazu, welche Fixierung und Laufzeit gemeint sind. "
+        "Länge: 120-150 Wörter. Struktur: Kurze Absätze oder nummerierte Punkte. "
+        "Quantitative Angaben: Nenne konkrete Werte und Veränderungen in Basispunkten wo relevant."
     )
 
     user_prompt = (
-        "Analysiere folgenden HTML-Inhalt und erstelle eine kurze Zusammenfassung.\n\n"
-        "HTML:\n"
-        f"{html_content}"
+        "Analysiere die folgenden Marktdaten und Wettbewerbsangebote für Wohnimmobilienkredite:\n\n"
+        "JSON-Daten:\n"
+        f"{json_data}\n\n"
+        "Erstelle eine prägnante, professionelle Marktanalyse für Bankprofis."
     )
 
     response = client.responses.create(
@@ -113,7 +130,7 @@ def write_html(path: Path, content: str) -> None:
 
 
 def generate_commentary(
-    input_path: Path,
+    input_path: Optional[Path] = None,
     output_path: Optional[Path] = None,
     model: str = DEFAULT_MODEL,
 ) -> Path:
@@ -125,8 +142,18 @@ def generate_commentary(
             "OPENAI_API_KEY ist nicht gesetzt. Bitte in der .env Datei oder Umgebung hinterlegen."
         )
 
-    html_content = read_html(input_path)
-    commentary = request_commentary(html_content, model=model)
+    # Export database data as JSON
+    json_data = export_database_data()
+    commentary = request_commentary(json_data, model=model)
+    
+    # Read HTML file for embedding commentary (input_path is now optional but still needed for output)
+    if input_path is None:
+        input_path = Path("bank_comparison_housing_loan_durchblicker_email.html")
+    
+    if not input_path.exists():
+        raise FileNotFoundError(f"HTML-Datei nicht gefunden: {input_path}")
+    
+    html_content = input_path.read_text(encoding="utf-8")
 
     target_path = output_path or input_path.with_name(
         input_path.stem + "_commented" + input_path.suffix
@@ -144,7 +171,7 @@ def parse_args() -> argparse.Namespace:
         "--input",
         type=Path,
         default=Path("bank_comparison_housing_loan_durchblicker_email.html"),
-        help="Pfad zur Eingabe-HTML-Datei",
+        help="Pfad zur Eingabe-HTML-Datei (für Kommentar-Einbettung, Daten kommen aus Datenbank)",
     )
     parser.add_argument(
         "--output",

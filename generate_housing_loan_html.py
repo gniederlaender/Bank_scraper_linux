@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 from db_helper import get_all_loan_offers
+import glob
 
 # Try to load dotenv if available
 try:
@@ -32,6 +33,7 @@ DB_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_DB_PATH', 'austrian_banks_housing_l
 HTML_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_HTML_PATH', 'bank_comparison_housing_loan_durchblicker.html')
 HTML_EMAIL_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_EMAIL_HTML_PATH', 'bank_comparison_housing_loan_durchblicker_email.html')
 CHART_PNG_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_CHART_PNG_PATH', 'housing_loan_chart.png')
+SCREENSHOTS_DIR = BASE_DIR / 'screenshots'
 
 
 def generate_interactive_chart():
@@ -309,7 +311,7 @@ def generate_interactive_chart():
         print("   (Email version will be generated without chart)")
         png_base64 = None
     
-    return chart_html, laufzeit_values, trace_metadata, png_base64
+    return chart_html, laufzeit_values, fixierung_values, trace_metadata, png_base64
 
 
 def generate_static_png_chart(df, fixierung_values, laufzeit_values, colors):
@@ -425,11 +427,102 @@ def get_all_runs_data():
     return runs_list, all_variations
 
 
+def get_latest_oenb_screenshots():
+    """Get the latest OeNB chart screenshots"""
+    screenshots = {}
+    
+    chart_patterns = {
+        'demand_verah_durchschn_kreditsumme_chart': 'oenb_nachfrage_verah_durchschn_kreditsumme_*.png',
+        'demand_nkv_zins_chart': 'oenb_nachfrage_nkv_zins_*.png'
+    }
+    
+    if not SCREENSHOTS_DIR.exists():
+        print("[WARN] Screenshots directory does not exist")
+        return screenshots
+    
+    for chart_id, pattern in chart_patterns.items():
+        matches = list(SCREENSHOTS_DIR.glob(pattern))
+        if matches:
+            # Sort by modification time, get the latest
+            latest = max(matches, key=lambda p: p.stat().st_mtime)
+            screenshots[chart_id] = latest
+            print(f"[INFO] Found latest {chart_id}: {latest}")
+        else:
+            print(f"[WARN] No screenshot found for {chart_id} (pattern: {pattern})")
+    
+    return screenshots
+
+
+def image_to_base64(image_path):
+    """Convert image file to base64 string"""
+    try:
+        with open(image_path, 'rb') as img_file:
+            import base64
+            img_data = base64.b64encode(img_file.read()).decode('utf-8')
+            # Detect image type from extension
+            ext = image_path.suffix.lower()
+            if ext == '.png':
+                mime_type = 'image/png'
+            elif ext in ['.jpg', '.jpeg']:
+                mime_type = 'image/jpeg'
+            else:
+                mime_type = 'image/png'  # default
+            return f"data:{mime_type};base64,{img_data}"
+    except Exception as e:
+        print(f"[WARN] Could not convert {image_path} to base64: {e}")
+        return None
+
+
+def generate_oenb_section_html(screenshots, for_email=False):
+    """Generate HTML section for OeNB charts
+    
+    Args:
+        screenshots: dict mapping chart_id to screenshot path
+        for_email: if True, use base64 encoding; if False, use relative paths
+    """
+    if not screenshots:
+        return ""
+    
+    oenb_html = '''
+        <div class="oenb-section" style="margin-top: 50px; padding: 25px; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h2 style="color: #2c3e50; margin-bottom: 25px; font-size: 1.8em; text-align: center;">📊 OeNB Wohnimmobilien Dashboard</h2>
+'''
+    
+    chart_names = {
+        'demand_verah_durchschn_kreditsumme_chart': 'Durchschnittliche Kreditsumme (Veränderung)',
+        'demand_nkv_zins_chart': 'Nettokreditvolumen & Zinssatz'
+    }
+    
+    for chart_id, screenshot_path in screenshots.items():
+        chart_name = chart_names.get(chart_id, chart_id)
+        
+        if for_email:
+            # Use base64 encoding for email
+            img_src = image_to_base64(screenshot_path)
+            if not img_src:
+                continue  # Skip if conversion failed
+        else:
+            # Use relative path for web version
+            img_src = f"screenshots/{screenshot_path.name}"
+        
+        oenb_html += f'''
+            <div style="margin-bottom: 30px;">
+                <h3 style="color: #2c3e50; margin-bottom: 15px; font-size: 1.3em;">{chart_name}</h3>
+                <img src="{img_src}" alt="{chart_name}" style="width: 100%; max-width: 1400px; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />
+            </div>
+'''
+    
+    oenb_html += '''
+        </div>
+'''
+    return oenb_html
+
+
 def generate_html():
     """Generate HTML page with interactive Plotly chart and data tables"""
     
     # Generate chart
-    chart_html, laufzeit_values, trace_metadata, png_base64 = generate_interactive_chart()
+    chart_html, laufzeit_values, fixierung_values, trace_metadata, png_base64 = generate_interactive_chart()
     
     if not chart_html:
         print("[WARN] No data found in database")
@@ -437,6 +530,9 @@ def generate_html():
     
     # Get all runs data
     runs, all_variations = get_all_runs_data()
+    
+    # Get latest OeNB screenshots
+    oenb_screenshots = get_latest_oenb_screenshots()
     
     if not runs:
         print("[WARN] No data found in database")
@@ -579,36 +675,34 @@ def generate_html():
         }}
         .run-info {{
             background-color: #ecf0f1;
-            padding: 20px;
+            padding: 15px;
             border-radius: 8px;
             margin-bottom: 30px;
             border-left: 5px solid #3498db;
         }}
         .run-info h3 {{
             margin-top: 0;
+            margin-bottom: 10px;
             color: #2c3e50;
-            font-size: 1.3em;
+            font-size: 1.0em;
+        }}
+        .run-info-text {{
+            color: #2c3e50;
+            font-size: 0.75em;
+            line-height: 1.6;
+            margin: 0;
         }}
         .run-info-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 15px;
-            margin-top: 15px;
+            display: none;
         }}
         .info-item {{
-            display: flex;
-            justify-content: space-between;
-            padding: 8px;
-            background-color: white;
-            border-radius: 4px;
+            display: none;
         }}
         .info-label {{
-            font-weight: bold;
-            color: #34495e;
+            display: none;
         }}
         .info-value {{
-            color: #2c3e50;
-            font-family: monospace;
+            display: none;
         }}
         .table-container {{
             overflow-x: auto;
@@ -689,14 +783,16 @@ def generate_html():
                 margin-bottom: 20px;
             }}
             .run-info h3 {{
-                font-size: 1.1em;
+                font-size: 0.9em;
+            }}
+            .run-info-text {{
+                font-size: 0.7em;
             }}
             .run-info-grid {{
-                grid-template-columns: 1fr;
-                gap: 10px;
+                display: none;
             }}
             .info-item {{
-                padding: 6px;
+                display: none;
             }}
             .chart-container {{
                 padding: 15px;
@@ -869,6 +965,12 @@ def generate_html():
 {f''.join([f'                        <option value="{lz}"{" selected" if lz == 25 else ""}>{lz} Jahre</option>\n' for lz in laufzeit_values])}                    </select>
                 </div>
                 <div class="control-group">
+                    <span class="control-label">Fixierung:</span>
+                    <select id="fixierung-filter">
+                        <option value="all">Alle Fixierungen</option>
+{f''.join([f'                        <option value="{fx}">{fx} Jahre</option>\n' for fx in fixierung_values])}                    </select>
+                </div>
+                <div class="control-group">
                     <span class="control-label">Anzeigen:</span>
                     <button id="btn-beide" onclick="setZinssatzFilter('beide')">Beide</button>
                     <button id="btn-zinssatz" onclick="setZinssatzFilter('zinssatz')">Nur Zinssatz</button>
@@ -891,6 +993,7 @@ def generate_html():
                 
                 // Current filter states
                 let currentLaufzeit = '25';
+                let currentFixierung = 'all';
                 let currentZinssatz = 'effektiver';
                 
                 // Apply combined filters (chart + tables)
@@ -919,11 +1022,15 @@ def generate_html():
                                 continue;
                             }}
                             
-                            // Get laufzeit from customdata (first element)
+                            // Get laufzeit and fixierung from customdata
                             const userLaufzeit = customdata[0][0];
+                            const userFixierung = customdata[0][2];
                             
                             // Check Laufzeit filter for user offers
                             const laufzeitMatch = currentLaufzeit === 'all' || userLaufzeit === parseInt(currentLaufzeit);
+                            
+                            // Check Fixierung filter for user offers
+                            const fixierungMatch = currentFixierung === 'all' || (userFixierung !== null && userFixierung === parseInt(currentFixierung));
                             
                             // Check Zinssatz type filter for user offers
                             let zinssatzMatch = true;
@@ -934,12 +1041,15 @@ def generate_html():
                             }}
                             // 'beide' means both are shown, so zinssatzMatch stays true
                             
-                            // Return true only if BOTH conditions match (AND logic)
-                            visible.push(laufzeitMatch && zinssatzMatch);
+                            // Return true only if ALL conditions match (AND logic)
+                            visible.push(laufzeitMatch && fixierungMatch && zinssatzMatch);
                         }} else {{
                             // Handle scraped data filtering (existing logic)
                             // Check Laufzeit filter
                             const laufzeitMatch = currentLaufzeit === 'all' || meta.laufzeit === parseInt(currentLaufzeit);
+                            
+                            // Check Fixierung filter
+                            const fixierungMatch = currentFixierung === 'all' || (meta.fixierung !== null && meta.fixierung === parseInt(currentFixierung));
                             
                             // Check Zinssatz type filter
                             let zinssatzMatch = true;
@@ -950,8 +1060,8 @@ def generate_html():
                             }}
                             // 'beide' means both are shown, so zinssatzMatch stays true
                             
-                            // Return true only if BOTH conditions match (AND logic)
-                            visible.push(laufzeitMatch && zinssatzMatch);
+                            // Return true only if ALL conditions match (AND logic)
+                            visible.push(laufzeitMatch && fixierungMatch && zinssatzMatch);
                         }}
                     }}
                     
@@ -991,14 +1101,19 @@ def generate_html():
                         finanzTitle.textContent = '📋 Finanzierungsdetails - Aktuelle Konditionen für ' + laufzeit + ' Jahre Laufzeit';
                     }}
                     
-                    document.querySelectorAll('.info-value')[0].textContent = '€' + run.kreditbetrag.toLocaleString('de-DE');
-                    document.querySelectorAll('.info-value')[1].textContent = run.laufzeit_jahre + ' Jahre';
-                    document.querySelectorAll('.info-value')[2].textContent = '€' + run.kaufpreis.toLocaleString('de-DE');
-                    document.querySelectorAll('.info-value')[3].textContent = '€' + run.kaufnebenkosten.toLocaleString('de-DE');
-                    document.querySelectorAll('.info-value')[4].textContent = '€' + run.eigenmittel.toLocaleString('de-DE');
-                    document.querySelectorAll('.info-value')[5].textContent = run.haushalt_alter + ' Jahre';
-                    document.querySelectorAll('.info-value')[6].textContent = '€' + run.haushalt_einkommen.toFixed(2) + '/Monat';
-                    document.querySelectorAll('.info-value')[7].textContent = run.haushalt_nutzflaeche + ' m²';
+                    // Update run info text paragraph
+                    const runInfoText = document.getElementById('run-info-text');
+                    if (runInfoText) {{
+                        runInfoText.textContent = 
+                            'Kreditbetrag: €' + run.kreditbetrag.toLocaleString('de-DE') + 
+                            ', Laufzeit: ' + run.laufzeit_jahre + ' Jahre' +
+                            ', Kaufpreis: €' + run.kaufpreis.toLocaleString('de-DE') +
+                            ', Kaufnebenkosten: €' + run.kaufnebenkosten.toLocaleString('de-DE') +
+                            ', Eigenmittel: €' + run.eigenmittel.toLocaleString('de-DE') +
+                            ', Haushalt Alter: ' + run.haushalt_alter + ' Jahre' +
+                            ', Netto-Einkommen: €' + run.haushalt_einkommen.toFixed(2) + '/Monat' +
+                            ', Wohnnutzfläche: ' + run.haushalt_nutzflaeche + ' m²';
+                    }}
                     
                     // Build Finanzierungsdetails table
                     let finanzTable = '';
@@ -1038,6 +1153,12 @@ def generate_html():
                 // Laufzeit dropdown change handler
                 document.getElementById('laufzeit-filter').addEventListener('change', function(e) {{
                     currentLaufzeit = e.target.value;
+                    applyFilters();
+                }});
+                
+                // Fixierung dropdown change handler
+                document.getElementById('fixierung-filter').addEventListener('change', function(e) {{
+                    currentFixierung = e.target.value;
                     applyFilters();
                 }});
                 
@@ -1152,42 +1273,16 @@ def generate_html():
         
         <div class="run-info">
             <h3>📊 Parameter für 25 Jahre Laufzeit</h3>
-            <div class="run-info-grid">
-                <div class="info-item">
-                    <span class="info-label">Kreditbetrag:</span>
-                    <span class="info-value">€{latest_run['kreditbetrag']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Laufzeit:</span>
-                    <span class="info-value">{latest_run['laufzeit_jahre']} Jahre</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Kaufpreis:</span>
-                    <span class="info-value">€{latest_run['kaufpreis']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Kaufnebenkosten:</span>
-                    <span class="info-value">€{latest_run['kaufnebenkosten']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Eigenmittel:</span>
-                    <span class="info-value">€{latest_run['eigenmittel']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Haushalt Alter:</span>
-                    <span class="info-value">{latest_run['haushalt_alter']} Jahre</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Netto-Einkommen:</span>
-                    <span class="info-value">€{latest_run['haushalt_einkommen']:,.2f}/Monat</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Wohnnutzfläche:</span>
-                    <span class="info-value">{latest_run['haushalt_nutzflaeche']} m²</span>
-                </div>
-            </div>
+            <p class="run-info-text" id="run-info-text">Kreditbetrag: €{latest_run['kreditbetrag']:,.0f}, Laufzeit: {latest_run['laufzeit_jahre']} Jahre, Kaufpreis: €{latest_run['kaufpreis']:,.0f}, Kaufnebenkosten: €{latest_run['kaufnebenkosten']:,.0f}, Eigenmittel: €{latest_run['eigenmittel']:,.0f}, Haushalt Alter: {latest_run['haushalt_alter']} Jahre, Netto-Einkommen: €{latest_run['haushalt_einkommen']:,.2f}/Monat, Wohnnutzfläche: {latest_run['haushalt_nutzflaeche']} m²</p>
         </div>
         
+'''
+    
+    # Add OeNB section if screenshots are available
+    oenb_section_html = generate_oenb_section_html(oenb_screenshots)
+    html_content += oenb_section_html
+    
+    html_content += f'''
         <div class="timestamp">
             Last Updated: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}<br>
             Data Source: Housing Loan Database | Latest Run ID: {latest_run['id']}<br>
@@ -1218,6 +1313,9 @@ def generate_email_html(png_base64):
     if not runs:
         print("[WARN] No data found in database")
         return False
+    
+    # Get latest OeNB screenshots
+    oenb_screenshots = get_latest_oenb_screenshots()
     
     # Get 25J run for table display (default)
     latest_run = None
@@ -1319,36 +1417,34 @@ def generate_email_html(png_base64):
         }}
         .run-info {{
             background-color: #ecf0f1;
-            padding: 20px;
+            padding: 15px;
             border-radius: 8px;
             margin-bottom: 30px;
             border-left: 5px solid #3498db;
         }}
         .run-info h3 {{
             margin-top: 0;
+            margin-bottom: 10px;
             color: #2c3e50;
-            font-size: 1.3em;
+            font-size: 1.0em;
+        }}
+        .run-info-text {{
+            color: #2c3e50;
+            font-size: 0.75em;
+            line-height: 1.6;
+            margin: 0;
         }}
         .run-info-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 15px;
-            margin-top: 15px;
+            display: none;
         }}
         .info-item {{
-            display: flex;
-            justify-content: space-between;
-            padding: 8px;
-            background-color: white;
-            border-radius: 4px;
+            display: none;
         }}
         .info-label {{
-            font-weight: bold;
-            color: #34495e;
+            display: none;
         }}
         .info-value {{
-            color: #2c3e50;
-            font-family: monospace;
+            display: none;
         }}
         .table-container {{
             overflow-x: auto;
@@ -1427,14 +1523,16 @@ def generate_email_html(png_base64):
                 margin-bottom: 20px;
             }}
             .run-info h3 {{
-                font-size: 1.1em;
+                font-size: 0.9em;
+            }}
+            .run-info-text {{
+                font-size: 0.7em;
             }}
             .run-info-grid {{
-                grid-template-columns: 1fr;
-                gap: 10px;
+                display: none;
             }}
             .info-item {{
-                padding: 6px;
+                display: none;
             }}
             .chart-container {{
                 padding: 15px;
@@ -1605,46 +1703,20 @@ def generate_email_html(png_base64):
         
         <div class="run-info">
             <h3>📊 Parameter für 25 Jahre Laufzeit</h3>
-            <div class="run-info-grid">
-                <div class="info-item">
-                    <span class="info-label">Kreditbetrag:</span>
-                    <span class="info-value">€{latest_run['kreditbetrag']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Laufzeit:</span>
-                    <span class="info-value">{latest_run['laufzeit_jahre']} Jahre</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Kaufpreis:</span>
-                    <span class="info-value">€{latest_run['kaufpreis']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Kaufnebenkosten:</span>
-                    <span class="info-value">€{latest_run['kaufnebenkosten']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Eigenmittel:</span>
-                    <span class="info-value">€{latest_run['eigenmittel']:,.0f}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Haushalt Alter:</span>
-                    <span class="info-value">{latest_run['haushalt_alter']} Jahre</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Netto-Einkommen:</span>
-                    <span class="info-value">€{latest_run['haushalt_einkommen']:,.2f}/Monat</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Wohnnutzfläche:</span>
-                    <span class="info-value">{latest_run['haushalt_nutzflaeche']} m²</span>
-                </div>
-            </div>
+            <p class="run-info-text">Kreditbetrag: €{latest_run['kreditbetrag']:,.0f}, Laufzeit: {latest_run['laufzeit_jahre']} Jahre, Kaufpreis: €{latest_run['kaufpreis']:,.0f}, Kaufnebenkosten: €{latest_run['kaufnebenkosten']:,.0f}, Eigenmittel: €{latest_run['eigenmittel']:,.0f}, Haushalt Alter: {latest_run['haushalt_alter']} Jahre, Netto-Einkommen: €{latest_run['haushalt_einkommen']:,.2f}/Monat, Wohnnutzfläche: {latest_run['haushalt_nutzflaeche']} m²</p>
         </div>
         
         <div class="timestamp">
             Last Updated: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}<br>
             Data Source: Housing Loan Database | Latest Run ID: {latest_run['id']}<br>
         </div>
+'''
+    
+    # Add OeNB section if screenshots are available (for email, use base64)
+    oenb_section_html = generate_oenb_section_html(oenb_screenshots, for_email=True)
+    html_content += oenb_section_html
+    
+    html_content += '''
     </div>
 </body>
 </html>

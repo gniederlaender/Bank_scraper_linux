@@ -4,8 +4,10 @@ Database helper module for storing durchblicker.at scraping results
 
 import sqlite3
 import os
+import json
+from collections import defaultdict
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 
 # Try to load dotenv if available
@@ -550,6 +552,396 @@ def parse_german_date(date_str: str) -> Optional[datetime]:
             return datetime.fromisoformat(date_str)
         except ValueError:
             return None
+
+
+# ============================================================================
+# JSON EXPORT FUNCTIONS FOR LLM COMMENTARY
+# ============================================================================
+
+def export_housing_loan_data_json(db_path: Path = DB_PATH) -> str:
+    """
+    Export housing loan time series data as JSON for LLM analysis.
+    Groups data by Fixierung/Laufzeit combinations with aggregated statistics.
+    Includes competitor loan offers from clients.
+    
+    Returns:
+        JSON string with aggregated data organized by Fixierung/Laufzeit
+    """
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Check if view exists
+    cursor.execute("""
+        SELECT name FROM sqlite_master 
+        WHERE type='view' AND name='housing_loan_chart_ready'
+    """)
+    view_exists = cursor.fetchone()
+    
+    if not view_exists:
+        conn.close()
+        raise ValueError("View 'housing_loan_chart_ready' does not exist. Please run create_housing_loan_view.py first.")
+    
+    # Query all data from the view, ordered by timestamp
+    cursor.execute("""
+        SELECT 
+            run_id,
+            run_scrape_date as scrape_timestamp,
+            fixierung_jahre,
+            run_laufzeit_jahre as laufzeit_jahre,
+            zinssatz_numeric,
+            effektiver_zinssatz_numeric,
+            zinssatz,
+            effektiver_zinssatz,
+            run_kreditbetrag
+        FROM housing_loan_chart_ready
+        ORDER BY run_scrape_date ASC, fixierung_jahre, run_laufzeit_jahre
+    """)
+    
+    rows = cursor.fetchall()
+    
+    # Convert to list of dictionaries
+    raw_data = []
+    for row in rows:
+        # Convert datetime to ISO format string for JSON serialization
+        timestamp = row['scrape_timestamp']
+        if isinstance(timestamp, str):
+            try:
+                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                timestamp = dt.isoformat()
+            except:
+                pass
+        elif timestamp:
+            timestamp = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
+        
+        raw_data.append({
+            'run_id': row['run_id'],
+            'scrape_timestamp': timestamp,
+            'fixierung_jahre': row['fixierung_jahre'],
+            'laufzeit_jahre': row['laufzeit_jahre'],
+            'zinssatz_numeric': row['zinssatz_numeric'],
+            'effektiver_zinssatz_numeric': row['effektiver_zinssatz_numeric'],
+            'zinssatz': row['zinssatz'],
+            'effektiver_zinssatz': row['effektiver_zinssatz'],
+            'kreditbetrag': float(row['run_kreditbetrag']) if row['run_kreditbetrag'] else None
+        })
+    
+    # Group by Fixierung/Laufzeit combination with time series per group
+    grouped_data = defaultdict(list)
+    
+    for record in raw_data:
+        key = (record['fixierung_jahre'], record['laufzeit_jahre'])
+        grouped_data[key].append(record)
+    
+    # Create aggregated time series by Fixierung/Laufzeit
+    time_series_by_combo = {}
+    for (fixierung, laufzeit), records in grouped_data.items():
+        # Sort by timestamp
+        sorted_records = sorted(records, key=lambda x: x['scrape_timestamp'])
+        
+        # Extract time series
+        timestamps = [r['scrape_timestamp'] for r in sorted_records]
+        zinssatz_series = [r['zinssatz_numeric'] for r in sorted_records]
+        effektiver_series = [r['effektiver_zinssatz_numeric'] for r in sorted_records]
+        
+        # Calculate statistics for this combination
+        zinssatz_values = [v for v in zinssatz_series if v is not None]
+        effektiver_values = [v for v in effektiver_series if v is not None]
+        
+        # Get latest and week-ago data
+        latest_record = sorted_records[-1] if sorted_records else None
+        week_ago = datetime.now() - timedelta(days=7)
+        week_ago_records = [
+            r for r in sorted_records 
+            if r['scrape_timestamp'] and 
+            datetime.fromisoformat(r['scrape_timestamp'].replace('Z', '+00:00')) >= week_ago
+        ]
+        
+        # Calculate week-over-week changes
+        zinssatz_change_week = None
+        effektiver_change_week = None
+        if latest_record and week_ago_records and len(week_ago_records) > 0:
+            week_ago_record = week_ago_records[0]  # First record from last week
+            if (latest_record.get('zinssatz_numeric') is not None and 
+                week_ago_record.get('zinssatz_numeric') is not None):
+                zinssatz_change_week = latest_record['zinssatz_numeric'] - week_ago_record['zinssatz_numeric']
+            if (latest_record.get('effektiver_zinssatz_numeric') is not None and 
+                week_ago_record.get('effektiver_zinssatz_numeric') is not None):
+                effektiver_change_week = latest_record['effektiver_zinssatz_numeric'] - week_ago_record['effektiver_zinssatz_numeric']
+        
+        time_series_by_combo[f"fixierung_{fixierung}_laufzeit_{laufzeit}"] = {
+            'fixierung_jahre': fixierung,
+            'laufzeit_jahre': laufzeit,
+            'total_data_points': len(records),
+            'date_range': {
+                'earliest': sorted_records[0]['scrape_timestamp'] if sorted_records else None,
+                'latest': sorted_records[-1]['scrape_timestamp'] if sorted_records else None
+            },
+            'statistics': {
+                'zinssatz': {
+                    'min': min(zinssatz_values) if zinssatz_values else None,
+                    'max': max(zinssatz_values) if zinssatz_values else None,
+                    'latest': latest_record['zinssatz_numeric'] if latest_record else None,
+                    'change_week': zinssatz_change_week
+                },
+                'effektiver_zinssatz': {
+                    'min': min(effektiver_values) if effektiver_values else None,
+                    'max': max(effektiver_values) if effektiver_values else None,
+                    'latest': latest_record['effektiver_zinssatz_numeric'] if latest_record else None,
+                    'change_week': effektiver_change_week
+                }
+            },
+            'time_series': {
+                'timestamps': timestamps,
+                'zinssatz_values': zinssatz_series,
+                'effektiver_zinssatz_values': effektiver_series
+            }
+        }
+    
+    # Get competitor loan offers
+    loan_offers_list = get_all_loan_offers(db_path)
+    competitor_offers = []
+    for offer in loan_offers_list:
+        # Convert datetime to ISO string if needed
+        offer_date = offer.get('angebotsdatum')
+        if hasattr(offer_date, 'isoformat'):
+            offer_date = offer_date.isoformat()
+        elif isinstance(offer_date, str):
+            try:
+                dt = datetime.strptime(offer_date, '%d.%m.%Y')
+                offer_date = dt.isoformat()
+            except:
+                pass
+        
+        competitor_offers.append({
+            'anbieter': offer.get('anbieter'),
+            'angebotsdatum': offer_date,
+            'fixzinssatz': offer.get('fixzinssatz'),
+            'effektivzinssatz': offer.get('effektivzinssatz'),
+            'laufzeit': offer.get('laufzeit'),
+            'laufzeit_numeric': offer.get('laufzeit_numeric'),
+            'fixzinssatz_in_jahren_numeric': offer.get('fixzinssatz_in_jahren_numeric')
+        })
+    
+    # Overall summary
+    if raw_data:
+        zinssatz_all = [d['zinssatz_numeric'] for d in raw_data if d['zinssatz_numeric'] is not None]
+        effektiver_all = [d['effektiver_zinssatz_numeric'] for d in raw_data if d['effektiver_zinssatz_numeric'] is not None]
+        
+        summary = {
+            'total_records': len(raw_data),
+            'unique_combinations': len(time_series_by_combo),
+            'date_range': {
+                'earliest': raw_data[0]['scrape_timestamp'] if raw_data else None,
+                'latest': raw_data[-1]['scrape_timestamp'] if raw_data else None
+            },
+            'overall_statistics': {
+                'zinssatz': {
+                    'min': min(zinssatz_all) if zinssatz_all else None,
+                    'max': max(zinssatz_all) if zinssatz_all else None
+                },
+                'effektiver_zinssatz': {
+                    'min': min(effektiver_all) if effektiver_all else None,
+                    'max': max(effektiver_all) if effektiver_all else None
+                }
+            },
+            'competitor_offers_count': len(competitor_offers)
+        }
+    else:
+        summary = {
+            'total_records': 0,
+            'unique_combinations': 0,
+            'date_range': {'earliest': None, 'latest': None},
+            'overall_statistics': {
+                'zinssatz': {'min': None, 'max': None},
+                'effektiver_zinssatz': {'min': None, 'max': None}
+            },
+            'competitor_offers_count': len(competitor_offers)
+        }
+    
+    result = {
+        'metadata': {
+            'export_date': datetime.now().isoformat(),
+            'data_type': 'housing_loan',
+            'database_path': str(db_path)
+        },
+        'summary': summary,
+        'market_data_by_fixierung_laufzeit': time_series_by_combo,
+        'competitor_offers': competitor_offers
+    }
+    
+    conn.close()
+    
+    return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+def export_consumer_loan_data_json(db_path: Path = CONSUMER_DB_PATH) -> str:
+    """
+    Export all consumer loan time series data as JSON for LLM analysis.
+    Exports full historical data from consumer_loan_chart_ready view or interest_rates table.
+    
+    Returns:
+        JSON string with all time series data
+    """
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Check if view exists, otherwise use table directly
+    cursor.execute("""
+        SELECT name FROM sqlite_master 
+        WHERE type='view' AND name='consumer_loan_chart_ready'
+    """)
+    view_exists = cursor.fetchone()
+    
+    if view_exists:
+        # Use the view if it exists
+        cursor.execute("""
+            SELECT 
+                id,
+                date_scraped,
+                bank_name,
+                product_name,
+                rate_numeric,
+                effektiver_jahreszins_numeric,
+                monatliche_rate_numeric,
+                rate,
+                effektiver_jahreszins,
+                monatliche_rate,
+                nettokreditbetrag,
+                gesamtbetrag,
+                vertragslaufzeit
+            FROM consumer_loan_chart_ready
+            ORDER BY date_scraped ASC, bank_name
+        """)
+    else:
+        # Fallback to interest_rates table
+        cursor.execute("""
+            SELECT 
+                id,
+                date_scraped,
+                bank_name,
+                product_name,
+                rate,
+                effektiver_jahreszins,
+                monatliche_rate,
+                nettokreditbetrag,
+                gesamtbetrag,
+                vertragslaufzeit
+            FROM interest_rates
+            WHERE rate != '-' AND effektiver_jahreszins != '-'
+            ORDER BY date_scraped ASC, bank_name
+        """)
+    
+    rows = cursor.fetchall()
+    
+    # Convert to list of dictionaries
+    data = []
+    for row in rows:
+        # Convert sqlite3.Row to dict for easier access
+        row_dict = dict(row)
+        
+        # Convert datetime to ISO format string for JSON serialization
+        timestamp = row_dict.get('date_scraped')
+        if isinstance(timestamp, str):
+            try:
+                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                timestamp = dt.isoformat()
+            except:
+                pass
+        elif timestamp:
+            timestamp = timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp)
+        
+        record = {
+            'id': row_dict.get('id'),
+            'date_scraped': timestamp,
+            'bank_name': row_dict.get('bank_name'),
+            'product_name': row_dict.get('product_name'),
+            'rate': row_dict.get('rate'),
+            'effektiver_jahreszins': row_dict.get('effektiver_jahreszins'),
+            'monatliche_rate': row_dict.get('monatliche_rate'),
+            'nettokreditbetrag': row_dict.get('nettokreditbetrag'),
+            'gesamtbetrag': row_dict.get('gesamtbetrag'),
+            'vertragslaufzeit': row_dict.get('vertragslaufzeit')
+        }
+        
+        # Add numeric fields if available (from view)
+        if 'rate_numeric' in row_dict:
+            record['rate_numeric'] = row_dict.get('rate_numeric')
+            record['effektiver_jahreszins_numeric'] = row_dict.get('effektiver_jahreszins_numeric')
+            record['monatliche_rate_numeric'] = row_dict.get('monatliche_rate_numeric')
+        
+        data.append(record)
+    
+    # Create summary statistics
+    if data:
+        # Get numeric values if available
+        rate_values = [d.get('rate_numeric') for d in data if d.get('rate_numeric') is not None]
+        effektiver_values = [d.get('effektiver_jahreszins_numeric') for d in data if d.get('effektiver_jahreszins_numeric') is not None]
+        
+        # Get latest data point
+        latest = data[-1] if data else None
+        
+        # Get unique banks
+        banks = list(set(d['bank_name'] for d in data if d['bank_name']))
+        
+        # Get data from last week
+        from datetime import timedelta
+        week_ago = datetime.now() - timedelta(days=7)
+        week_ago_data = [
+            d for d in data 
+            if d['date_scraped'] and 
+            datetime.fromisoformat(d['date_scraped'].replace('Z', '+00:00')) >= week_ago
+        ] if data else []
+        
+        summary = {
+            'total_records': len(data),
+            'unique_banks': len(banks),
+            'banks': banks,
+            'date_range': {
+                'earliest': data[0]['date_scraped'] if data else None,
+                'latest': data[-1]['date_scraped'] if data else None
+            },
+            'statistics': {
+                'rate': {
+                    'min': min(rate_values) if rate_values else None,
+                    'max': max(rate_values) if rate_values else None,
+                    'latest': latest.get('rate_numeric') if latest else None
+                },
+                'effektiver_jahreszins': {
+                    'min': min(effektiver_values) if effektiver_values else None,
+                    'max': max(effektiver_values) if effektiver_values else None,
+                    'latest': latest.get('effektiver_jahreszins_numeric') if latest else None
+                }
+            },
+            'records_last_week': len(week_ago_data)
+        }
+    else:
+        summary = {
+            'total_records': 0,
+            'unique_banks': 0,
+            'banks': [],
+            'date_range': {'earliest': None, 'latest': None},
+            'statistics': {
+                'rate': {'min': None, 'max': None, 'latest': None},
+                'effektiver_jahreszins': {'min': None, 'max': None, 'latest': None}
+            },
+            'records_last_week': 0
+        }
+    
+    result = {
+        'metadata': {
+            'export_date': datetime.now().isoformat(),
+            'data_type': 'consumer_loan',
+            'database_path': str(db_path)
+        },
+        'summary': summary,
+        'time_series_data': data
+    }
+    
+    conn.close()
+    
+    return json.dumps(result, indent=2, ensure_ascii=False)
 
 
 if __name__ == "__main__":
