@@ -43,19 +43,32 @@ def export_database_data() -> str:
         raise RuntimeError(f"Fehler beim Exportieren der Datenbankdaten: {e}")
 
 
-def request_commentary(json_data: str, model: str, max_tokens: int = 400) -> str:
+def request_commentary(json_data: str, model: str, max_tokens: int = 500) -> str:
     client = OpenAI()
 
     system_prompt = (
         "Du bist ein Finanzanalyst für den österreichischen Markt für Konsumkredite. "
         "Du erhältst JSON-Daten mit historischen Zinssatzdaten für Konsumkredite. "
         "Die Daten enthalten eine Zusammenfassung (summary) mit Statistiken und eine vollständige Zeitreihe (time_series_data). "
-        "Analysiere die Entwicklung und beschreibe die ersichtlichen Veränderungen. "
-        "Einerseits geht es um die Gesamtentwicklung seit Beginn. Beschreibe diese mit maximal zwei Sätzen. "
-        "Andererseits geht es um die Veränderungen der letzten Woche. Beschreibe diese mit maximal zwei Sätzen. "
-        "Begrenze dich auf die Beschreibung der Veränderung der Zinssätze und "
-        "gib eine kurze Zusammenfassung der aktuellen Zinssätze (höchster und niedrigster), aber gib nicht die einzelnen Zinssätze wieder."
-        "Formuliere deine Antwort prägnant auf Deutsch (maximal 80 Wörter). "
+        "\n\n"
+        "Deine Analyse soll folgende Punkte abdecken: "
+        "• Aktuelle Marktdynamik: Ich will eine Aufzählung der Veränderungen der Preise von allen Banken als Liste zwischen dem letzten und dem vorletzten Scraping-run. "
+        "WICHTIG: Verwende die Zeitreihendaten (time_series_data): "
+        "Für jede Bank (bank_name) in den Daten: "
+        "- Finde den letzten Eintrag (neuestes date_scraped) für diese Bank "
+        "- Finde den vorletzten Eintrag (zweites neuestes date_scraped) für diese Bank "
+        "- Verwende effektiver_jahreszins_numeric (falls vorhanden) oder effektiver_jahreszins (als Fallback) "
+        "- Berechne: Veränderung = letzter Wert - vorletzter Wert "
+        "- Berechne: Basispunkte = Veränderung * 100 (z.B. 0.15 * 100 = 15) und runde auf ganze Zahl "
+        "- Formatiere als: 'Bankname: vorheriger% -> aktueller% = +change_in_bps Basispunkte' "
+        "Beispiel: Bank XYZ, letzter=3.25%, vorletzter=3.10% → Veränderung=0.15%, Basispunkte=15 → "
+        "Ausgabe: 'Bank XYZ: 3.10 -> 3.25 = +15 Basispunkte'. "
+        "Nur Banken auflisten, für die sowohl letzter als auch vorletzter Wert vorhanden sind. "
+        "Ich will keine prozentualen Veränderungen, nur die Basispunkte als ganze Zahlen. "
+        "• Zusammenfassung: Gib eine kurze Zusammenfassung der aktuellen Zinssätze (höchster und niedrigster), aber gib nicht die einzelnen Zinssätze wieder."
+        "\n\n"
+        "Formuliere deine Antwort prägnant auf Deutsch (maximal 150-180 Wörter). "
+        "Struktur: Kurze Absätze oder nummerierte Punkte. "
         "Nutze Aufzählungen, wenn es die Lesbarkeit verbessert."
     )
 
@@ -128,6 +141,7 @@ def generate_commentary(
     input_path: Optional[Path] = None,
     output_path: Optional[Path] = None,
     model: str = DEFAULT_MODEL,
+    max_tokens: int = 500,
 ) -> Path:
     load_dotenv()
 
@@ -139,7 +153,7 @@ def generate_commentary(
 
     # Export database data as JSON
     json_data = export_database_data()
-    commentary = request_commentary(json_data, model=model)
+    commentary = request_commentary(json_data, model=model, max_tokens=max_tokens)
     
     # Read HTML file for embedding commentary (input_path is now optional but still needed for output)
     if input_path is None:
@@ -182,7 +196,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=400,
+        default=500,
         help="Maximale Anzahl an Tokens für die Antwort",
     )
     return parser.parse_args()
@@ -195,6 +209,7 @@ def main() -> None:
             input_path=args.input,
             output_path=args.output,
             model=args.model,
+            max_tokens=args.max_tokens,
         )
     except Exception as exc:  # pragma: no cover - CLI feedback
         raise SystemExit(f"Fehler: {exc}")

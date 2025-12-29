@@ -43,7 +43,7 @@ def export_database_data() -> str:
         raise RuntimeError(f"Fehler beim Exportieren der Datenbankdaten: {e}")
 
 
-def request_commentary(json_data: str, model: str, max_tokens: int = 400) -> str:
+def request_commentary(json_data: str, model: str, max_tokens: int = 500) -> str:
     client = OpenAI()
 
     system_prompt = (
@@ -54,13 +54,24 @@ def request_commentary(json_data: str, model: str, max_tokens: int = 400) -> str
         "2) Wettbewerbsangebote (tatsächliche Angebote von Konkurrenzbanken). "
         "\n\n"
         "Deine Analyse soll folgende Punkte abdecken: "
-        "• Marktentwicklung: Trends über den gesamten Zeitraum (kritische Beobachtungen) "
-        "• Aktuelle Marktdynamik: Veränderungen der letzten Woche (Basiswerte und Änderungen in Basispunkten) "
-        "• Konkurrenzanalyse: Gib eine Übersicht der günstigsten Konkurrenzangebote. Nur die aktuellsten Angebote. Du kannst ruhig 2 bis drei konkrete Angebote nennen."
+        "• Aktuelle Marktdynamik: Ich will eine Aufzählung der Veränderungen der Preise von allen Fixierungen der 25J Laufzeit als Liste zwischen dem letzten und dem vorletzten Scraping-run. "
+        "WICHTIG: Verwende die vorkalkulierten Werte aus market_data_by_fixierung_laufzeit: "
+        "Für jede Fixierung (0J, 5J, 10J, 15J, 20J, 25J) mit laufzeit_jahre=25: "
+        "- Nimm statistics.zinssatz.latest als aktuellen Wert (z.B. 3.13) "
+        "- Nimm statistics.zinssatz.change_week als Veränderung in Prozent (z.B. 0.03) "
+        "- Berechne: vorheriger Wert = latest - change_week (z.B. 3.13 - 0.03 = 3.10) "
+        "- Berechne: Basispunkte = change_week * 100 (z.B. 0.03 * 100 = 3) und runde auf ganze Zahl "
+        "- Formatiere als: 'X Jahre: vorheriger% -> latest% = +change_in_bps Basispunkte' "
+        "Beispiel: latest=3.13, change_week=0.03 → vorheriger=3.10, Basispunkte=3 → "
+        "Ausgabe: '5 Jahre: 3.10 -> 3.13 = +3 Basispunkte'. "
+        "Für 0J Fixierung schreibe 'variabel' statt '0 Jahre'. "
+        "Ich will keine prozentualen Veränderungen, nur die Basispunkte als ganze Zahlen."
+        "• Konkurrenzanalyse: Gib eine Übersicht der 3 neuesten Konkurrenzangebote. Bezeiehe Dich nur auf die aktuellsten Angebote (such nach den 3 neuesten angebotsdatum in competitor_offers). Nimm die drei konkreten Angebote, nenne den Zinssatz, Fixierung und Laufzeit, sowie die Bank."
         "\n\n"
         "Stil: Präzise, faktenbasiert, für Bankprofis. Verwende Fachbegriffe korrekt. "
         "Wenn du über Zinssätze berichtest, sage immer dazu, welche Fixierung und Laufzeit gemeint sind. "
-        "Länge: 120-150 Wörter. Struktur: Kurze Absätze oder nummerierte Punkte. "
+        "Die Variante 0J, oder 0-jährige Fixierung nennt man variabel. Bitte nenne sie überall auch so."
+        "Länge: 150-180 Wörter. Struktur: Kurze Absätze oder nummerierte Punkte. "
         "Quantitative Angaben: Nenne konkrete Werte und Veränderungen in Basispunkten wo relevant."
     )
 
@@ -133,6 +144,7 @@ def generate_commentary(
     input_path: Optional[Path] = None,
     output_path: Optional[Path] = None,
     model: str = DEFAULT_MODEL,
+    max_tokens: int = 500,
 ) -> Path:
     load_dotenv()
 
@@ -144,7 +156,7 @@ def generate_commentary(
 
     # Export database data as JSON
     json_data = export_database_data()
-    commentary = request_commentary(json_data, model=model)
+    commentary = request_commentary(json_data, model=model, max_tokens=max_tokens)
     
     # Read HTML file for embedding commentary (input_path is now optional but still needed for output)
     if input_path is None:
@@ -187,7 +199,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=400,
+        default=500,
         help="Maximale Anzahl an Tokens für die Antwort",
     )
     return parser.parse_args()
@@ -200,6 +212,7 @@ def main() -> None:
             input_path=args.input,
             output_path=args.output,
             model=args.model,
+            max_tokens=args.max_tokens,
         )
     except Exception as exc:  # pragma: no cover - CLI feedback
         raise SystemExit(f"Fehler: {exc}")

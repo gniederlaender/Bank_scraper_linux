@@ -55,8 +55,8 @@ class AustrianBankScraper:
     def __init__(self):
         self.banks = {
             'raiffeisen': {
-                'url': 'https://www.raiffeisen.at/noew/rlb/de/privatkunden/kredit-leasing/der-faire-credit.html',
-                'interest_rates_url': 'https://www.raiffeisen.at/noew/rlb/de/privatkunden/kredit-leasing/der-faire-credit.html'
+                'url': 'https://stadtbank.raiffeisen.at/de/home/der-faire-credit.html',
+                'interest_rates_url': 'https://stadtbank.raiffeisen.at/de/home/der-faire-credit.html'
             },
             'bawag': {
                 'url': 'https://kreditrechner.bawag.at/',
@@ -123,10 +123,10 @@ class AustrianBankScraper:
         # Switch to enable/disable scraping for each bank
         self.enable_scraping = {
             'raiffeisen': True,
-            'bawag': True,
-            'bank99': True,
-            'erste': True,
-            'santander': True
+            'bawag': False,
+            'bank99': False,
+            'erste': False,
+            'santander': False
         }
         
         self.ua = UserAgent()
@@ -221,20 +221,73 @@ class AustrianBankScraper:
             url = self.banks[bank_name]['interest_rates_url']
             logger.info(f"Scraping interest rates for {bank_name}")
             
-            self.driver.get(url)
-            time.sleep(5)  # Add a delay to let the page load completely
+            # Skip browser navigation for API-only banks (Erste, Santander)
+            if bank_name not in ['erste', 'santander']:
+                self.driver.get(url)
+                time.sleep(5)  # Add a delay to let the page load completely
             
             if bank_name == 'raiffeisen':
                 # Extract interest rate and fees from the specified element
                 try:
-                    # Wait longer for the element to be present
-                    time.sleep(10)  # Increased wait time
+                    # Handle cookie banner - click "Zustimmen" if present
+                    try:
+                        logger.info("Checking for cookie banner...")
+                        # Wait a bit for the page to load
+                        time.sleep(3)
+                        
+                        # Try multiple strategies to find and click the accept button
+                        cookie_button_found = False
+                        cookie_selectors = [
+                            # Text-based selectors
+                            (By.XPATH, "//button[contains(text(), 'Zustimmen')]"),
+                            (By.XPATH, "//button[contains(text(), 'zustimmen')]"),
+                            (By.XPATH, "//*[contains(text(), 'Zustimmen')]"),
+                            (By.XPATH, "//a[contains(text(), 'Zustimmen')]"),
+                            # Button role with text
+                            (By.XPATH, "//button[@role='button' and contains(text(), 'Zustimmen')]"),
+                            # ID/class based (common patterns)
+                            (By.ID, "accept-cookies"),
+                            (By.ID, "cookie-accept"),
+                            (By.CSS_SELECTOR, "[id*='cookie'][id*='accept']"),
+                            (By.CSS_SELECTOR, "[class*='cookie'][class*='accept']"),
+                            (By.CSS_SELECTOR, "[class*='consent'][class*='accept']"),
+                            (By.CSS_SELECTOR, "button[class*='zustimmen']"),
+                            (By.CSS_SELECTOR, "a[class*='zustimmen']"),
+                        ]
+                        
+                        for selector_type, selector_value in cookie_selectors:
+                            try:
+                                cookie_button = self.wait.until(
+                                    EC.element_to_be_clickable((selector_type, selector_value))
+                                )
+                                if cookie_button:
+                                    cookie_button.click()
+                                    logger.info(f"Cookie banner accepted using selector: {selector_type}, {selector_value}")
+                                    cookie_button_found = True
+                                    time.sleep(2)  # Wait for banner to disappear
+                                    break
+                            except Exception as e:
+                                logger.debug(f"Cookie selector {selector_type}, {selector_value} failed: {e}")
+                                continue
+                        
+                        if not cookie_button_found:
+                            logger.info("No cookie banner found or already accepted")
+                    except Exception as e:
+                        logger.warning(f"Error handling cookie banner (continuing anyway): {e}")
                     
-                    # Try different selectors
+                    # Wait longer for the element to be present
+                    time.sleep(5)  # Wait after cookie banner handling
+                    
+                    # Try different selectors - expanded list with more fallback options
                     selectors = [
                         '.credit-calculator-dfc-representative-calc',
-                        '[class*="representative-calc"]',  # More flexible selector
-                        '[class*="credit-calculator"]'     # Even more flexible
+                        '[class*="representative-calc"]',
+                        '[class*="credit-calculator"]',
+                        '[class*="representative"]',
+                        '[class*="berechnungsbeispiel"]',
+                        '[id*="representative"]',
+                        '[id*="calculator"]',
+                        '[id*="credit-calculator"]',
                     ]
                     
                     element = None
@@ -246,10 +299,47 @@ class AustrianBankScraper:
                             if element:
                                 logger.info(f"Found element with selector: {selector}")
                                 break
-                        except:
+                        except Exception as e:
+                            logger.debug(f"Selector {selector} failed: {e}")
                             continue
                     
+                    # If still not found, try to find by text content using XPath
                     if not element:
+                        try:
+                            # Look for any element containing key terms
+                            xpath_options = [
+                                "//*[contains(text(), 'Sollzinssatz')]",
+                                "//*[contains(text(), 'Repräsentatives')]",
+                                "//*[contains(text(), 'effektiver Jahreszins')]",
+                                "//*[contains(text(), 'Berechnungsbeispiel')]",
+                            ]
+                            for xpath in xpath_options:
+                                try:
+                                    text_element = self.wait.until(
+                                        EC.presence_of_element_located((By.XPATH, xpath))
+                                    )
+                                    if text_element:
+                                        # Get parent container (div or section)
+                                        element = text_element.find_element(By.XPATH, "./ancestor::div[1] | ./ancestor::section[1]")
+                                        logger.info(f"Found element using XPath text search: {xpath}")
+                                        break
+                                except Exception as e:
+                                    logger.debug(f"XPath {xpath} failed: {e}")
+                                    continue
+                        except Exception as e:
+                            logger.debug(f"XPath text search failed: {e}")
+                    
+                    if not element:
+                        # Take screenshot for debugging before raising error
+                        screenshot_name = f"raiffeisen_error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                        self.driver.save_screenshot(screenshot_name)
+                        logger.error(f"Could not find representative calculation element. Screenshot saved: {screenshot_name}")
+                        # Also try to get page source for debugging
+                        try:
+                            page_source_snippet = self.driver.page_source[:2000]
+                            logger.debug(f"Page source snippet: {page_source_snippet}")
+                        except:
+                            pass
                         raise Exception("Could not find the representative calculation element")
                     
                     text = element.text

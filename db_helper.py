@@ -648,26 +648,68 @@ def export_housing_loan_data_json(db_path: Path = DB_PATH) -> str:
         zinssatz_values = [v for v in zinssatz_series if v is not None]
         effektiver_values = [v for v in effektiver_series if v is not None]
         
-        # Get latest and week-ago data
+        # Get latest record
         latest_record = sorted_records[-1] if sorted_records else None
-        week_ago = datetime.now() - timedelta(days=7)
-        week_ago_records = [
-            r for r in sorted_records 
-            if r['scrape_timestamp'] and 
-            datetime.fromisoformat(r['scrape_timestamp'].replace('Z', '+00:00')) >= week_ago
-        ]
         
-        # Calculate week-over-week changes
+        # Calculate week-over-week changes by comparing with PREVIOUS scraping run
+        # Group records by unique scraping date (date part only, ignoring time)
+        # to identify distinct scraping runs
+        records_by_date = {}
+        for r in sorted_records:
+            if r['scrape_timestamp']:
+                try:
+                    # Parse timestamp and extract date part (YYYY-MM-DD)
+                    ts = r['scrape_timestamp']
+                    if isinstance(ts, str):
+                        dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                    else:
+                        dt = ts
+                    date_key = dt.date()  # Use date only to group by scraping day
+                    
+                    # Keep the latest record for each date
+                    if date_key not in records_by_date:
+                        records_by_date[date_key] = r
+                    else:
+                        # If multiple records on same date, keep the one with latest timestamp
+                        existing_ts = records_by_date[date_key]['scrape_timestamp']
+                        if isinstance(existing_ts, str):
+                            existing_dt = datetime.fromisoformat(existing_ts.replace('Z', '+00:00'))
+                        else:
+                            existing_dt = existing_ts
+                        if dt > existing_dt:
+                            records_by_date[date_key] = r
+                except:
+                    pass
+        
+        # Get unique scraping dates sorted
+        unique_dates = sorted(records_by_date.keys())
+        
+        # Calculate changes: compare latest with previous scraping run
         zinssatz_change_week = None
         effektiver_change_week = None
-        if latest_record and week_ago_records and len(week_ago_records) > 0:
-            week_ago_record = week_ago_records[0]  # First record from last week
-            if (latest_record.get('zinssatz_numeric') is not None and 
-                week_ago_record.get('zinssatz_numeric') is not None):
-                zinssatz_change_week = latest_record['zinssatz_numeric'] - week_ago_record['zinssatz_numeric']
-            if (latest_record.get('effektiver_zinssatz_numeric') is not None and 
-                week_ago_record.get('effektiver_zinssatz_numeric') is not None):
-                effektiver_change_week = latest_record['effektiver_zinssatz_numeric'] - week_ago_record['effektiver_zinssatz_numeric']
+        if latest_record and len(unique_dates) >= 2:
+            # Latest scraping date
+            latest_date = unique_dates[-1]
+            # Previous scraping date
+            previous_date = unique_dates[-2]
+            
+            latest_record_for_date = records_by_date[latest_date]
+            previous_record_for_date = records_by_date[previous_date]
+            
+            # Calculate changes (round to 3 decimal places to avoid floating point precision issues)
+            if (latest_record_for_date.get('zinssatz_numeric') is not None and 
+                previous_record_for_date.get('zinssatz_numeric') is not None):
+                zinssatz_change_week = round(
+                    latest_record_for_date['zinssatz_numeric'] - previous_record_for_date['zinssatz_numeric'],
+                    3
+                )
+            
+            if (latest_record_for_date.get('effektiver_zinssatz_numeric') is not None and 
+                previous_record_for_date.get('effektiver_zinssatz_numeric') is not None):
+                effektiver_change_week = round(
+                    latest_record_for_date['effektiver_zinssatz_numeric'] - previous_record_for_date['effektiver_zinssatz_numeric'],
+                    3
+                )
         
         time_series_by_combo[f"fixierung_{fixierung}_laufzeit_{laufzeit}"] = {
             'fixierung_jahre': fixierung,
@@ -722,6 +764,26 @@ def export_housing_loan_data_json(db_path: Path = DB_PATH) -> str:
             'laufzeit_numeric': offer.get('laufzeit_numeric'),
             'fixzinssatz_in_jahren_numeric': offer.get('fixzinssatz_in_jahren_numeric')
         })
+    
+    # Sort competitor offers by date (newest first)
+    # Handle both ISO format strings and datetime objects
+    def get_sort_date(offer):
+        date_str = offer.get('angebotsdatum', '')
+        if not date_str:
+            return datetime.min
+        try:
+            if isinstance(date_str, str):
+                if 'T' in date_str:
+                    return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                else:
+                    return datetime.strptime(date_str, '%Y-%m-%d')
+            elif hasattr(date_str, 'isoformat'):
+                return date_str
+        except:
+            return datetime.min
+        return datetime.min
+    
+    competitor_offers.sort(key=get_sort_date, reverse=True)
     
     # Overall summary
     if raw_data:

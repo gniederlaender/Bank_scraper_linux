@@ -749,7 +749,7 @@ def screen4(page, laufzeiten_to_scrape: List[int] = None) -> Dict[int, List[Dict
                             if label_loc.count() > 0 and value_loc.count() > 0:
                                 label = label_loc.inner_text().strip()
                                 value = value_loc.inner_text().strip()
-                                
+                    
                                 if label and value and value != label:
                                     # Clean up the label to match our expected keys
                                     clean_label = label.replace('Anschlusskondition nach Fixzinsphase', 'Anschlusskondition')

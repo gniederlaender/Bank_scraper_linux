@@ -33,7 +33,48 @@ DB_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_DB_PATH', 'austrian_banks_housing_l
 HTML_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_HTML_PATH', 'bank_comparison_housing_loan_durchblicker.html')
 HTML_EMAIL_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_EMAIL_HTML_PATH', 'bank_comparison_housing_loan_durchblicker_email.html')
 CHART_PNG_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_CHART_PNG_PATH', 'housing_loan_chart.png')
+INDIVIDUAL_OFFERS_CHART_PNG_PATH = BASE_DIR / os.getenv('INDIVIDUAL_OFFERS_CHART_PNG_PATH', 'individual_offers_chart.png')
 SCREENSHOTS_DIR = BASE_DIR / 'screenshots'
+
+
+def get_bank_color(anbieter: str) -> str:
+    """
+    Get color for a bank based on its name.
+    
+    Color scheme:
+    - Bank Austria / UniCredit - red
+    - Volksbank - blue
+    - Raiffeisen - yellow
+    - Sparkasse (any) - light blue
+    - Others - any color from palette
+    """
+    anbieter_lower = anbieter.lower()
+    
+    # Specific bank colors
+    if 'bank austria' in anbieter_lower or 'unicredit' in anbieter_lower:
+        return '#FF0000'  # Red
+    elif 'volksbank' in anbieter_lower:
+        return '#0000FF'  # Blue
+    elif 'raiffeisen' in anbieter_lower:
+        return '#FFFF00'  # Yellow
+    elif 'sparkasse' in anbieter_lower:
+        return '#87CEEB'  # Light Blue (Sky Blue) - for all Sparkasse banks
+    
+    # Default colors for other banks
+    default_colors = [
+        '#FFA500',  # Orange
+        '#FF69B4',  # Hot Pink
+        '#32CD32',  # Lime Green
+        '#1E90FF',  # Dodger Blue
+        '#9370DB',  # Medium Purple
+        '#FF1493',  # Deep Pink
+        '#00CED1',  # Dark Turquoise
+        '#FFD700',  # Gold
+    ]
+    
+    # Use hash of bank name to consistently assign colors
+    hash_value = hash(anbieter) % len(default_colors)
+    return default_colors[hash_value]
 
 
 def generate_interactive_chart():
@@ -145,90 +186,6 @@ def generate_interactive_chart():
                 customdata=[[laufzeit, 'effektiver', fixierung]] * len(data)
             ))
     
-    # Add user loan offers if available
-    try:
-        user_offers = get_all_loan_offers()
-        
-        if user_offers:
-            print(f"[INFO] Adding {len(user_offers)} individual user offers to chart...")
-            
-            # Get unique anbieters for color assignment
-            anbieters = list(set(offer['anbieter'] for offer in user_offers))
-            
-            # Color palette for different anbieters
-            colors_user = {
-                # Predefined colors for known banks
-                'UniCredit Bank Austria AG': '#FF0000',  # Red
-                'Raiffeisen': '#FF6B6B',  # Light red
-                'Sparkasse': '#4ECDC4',  # Turquoise
-                'Erste Bank': '#95E1D3',  # Light turquoise
-            }
-            
-            # Default colors for other banks
-            default_colors = ['#FFA500', '#FFD700', '#FF69B4', '#FF1493', '#32CD32', '#1E90FF']
-            
-            anbieter_traces = {}  # Track traces per anbieter
-            
-            for i, offer in enumerate(user_offers):
-                anbieter = offer['anbieter']
-                date = offer['angebotsdatum']
-                laufzeit_numeric = offer.get('laufzeit_numeric')  # Get parsed laufzeit
-                fixzins_years = offer.get('fixzinssatz_in_jahren_numeric')
-                fixzins_display = offer.get('fixzinssatz_in_jahren_display') or "n/a"
-                
-                # Get color for this anbieter
-                color = colors_user.get(anbieter, default_colors[i % len(default_colors)])
-                
-                # Create trace name pattern for grouping
-                trace_name = f"User Offer: {anbieter[:20]}..."
-                
-                # Trace for fixzinssatz
-                fig.add_trace(go.Scatter(
-                    x=[date],
-                    y=[offer['fixzinssatz']],
-                    mode='markers',
-                    name=trace_name,
-                    line=dict(color=color, width=1),
-                    marker=dict(size=12, symbol='star', color=color, line=dict(width=2, color='black')),
-                    legendgroup='user_offers',
-                    hovertemplate=(
-                        f'<b>Individual Offer - {anbieter}</b><br>'
-                        'Datum: %{x|%d.%m.%Y}<br>'
-                        f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
-                        f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
-                        f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
-                        f'Fixzinsperiode: {fixzins_display}<br>'
-                        '<extra></extra>'
-                    ),
-                    visible=False,  # Hidden by default
-                    customdata=[[laufzeit_numeric, 'user_offer_fix', fixzins_years]]
-                ))
-                
-                # Trace for effektivzinssatz
-                fig.add_trace(go.Scatter(
-                    x=[date],
-                    y=[offer['effektivzinssatz']],
-                    mode='markers',
-                    name=trace_name + ' (Eff.)',
-                    line=dict(color=color, width=1),
-                    marker=dict(size=12, symbol='diamond', color=color, line=dict(width=2, color='black')),
-                    legendgroup='user_offers',
-                    hovertemplate=(
-                        f'<b>Individual Offer - {anbieter}</b><br>'
-                        'Datum: %{x|%d.%m.%Y}<br>'
-                        f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
-                        f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
-                        f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
-                        f'Fixzinsperiode: {fixzins_display}<br>'
-                        '<extra></extra>'
-                    ),
-                    visible=False,  # Hidden by default
-                    customdata=[[laufzeit_numeric, 'user_offer_eff', fixzins_years]]
-                ))
-                
-    except Exception as e:
-        print(f"[WARN] Could not add user offers to chart: {e}")
-    
     # We'll use custom HTML controls instead of Plotly updatemenus for combined filtering
     # Store trace metadata for JavaScript filtering
     trace_metadata = []
@@ -245,7 +202,7 @@ def generate_interactive_chart():
     # Update layout (no updatemenus - we'll use custom HTML controls)
     fig.update_layout(
         title={
-            'text': '🏠 Immobilienkredit Zinsentwicklung - Interaktive Analyse',
+            'text': '🏠 Wohnkredite - Durchblicker-Bestpreis',
             'x': 0.5,
             'xanchor': 'center',
             'font': {'size': 20, 'family': 'Segoe UI, Arial'}
@@ -312,6 +269,286 @@ def generate_interactive_chart():
         png_base64 = None
     
     return chart_html, laufzeit_values, fixierung_values, trace_metadata, png_base64
+
+
+def generate_individual_offers_chart():
+    """
+    Generate interactive Plotly chart with ONLY individual loan offers.
+    
+    Features:
+    - Color coding by bank/competitor (not fixierung)
+    - Same filters: Laufzeit, Fixierung, Zinssatz type
+    - Interactive legend, zoom, pan, hover
+    """
+    # Get all individual offers
+    try:
+        user_offers = get_all_loan_offers()
+        
+        if not user_offers:
+            print("[WARN] No individual offers found in database")
+            return None, [], [], []
+        
+        print(f"[INFO] Found {len(user_offers)} individual offers")
+                
+    except Exception as e:
+        print(f"[ERROR] Could not retrieve individual offers: {e}")
+        return None, [], [], []
+    
+    # Get unique values for filters
+    laufzeit_values = sorted(set(
+        offer.get('laufzeit_numeric') 
+        for offer in user_offers 
+        if offer.get('laufzeit_numeric') is not None
+    ))
+    
+    fixierung_values = sorted(set(
+        offer.get('fixzinssatz_in_jahren_numeric')
+        for offer in user_offers
+        if offer.get('fixzinssatz_in_jahren_numeric') is not None
+    ))
+    
+    print(f"[INFO] Individual offers - Laufzeit values: {laufzeit_values}")
+    print(f"[INFO] Individual offers - Fixierung values: {fixierung_values}")
+            
+    # Create figure
+    fig = go.Figure()
+    
+    # Group offers by bank for consistent coloring
+    bank_colors = {}
+    
+    # Add traces for each offer
+    for offer in user_offers:
+                anbieter = offer['anbieter']
+                date = offer['angebotsdatum']
+                laufzeit_numeric = offer.get('laufzeit_numeric')
+                fixzins_years = offer.get('fixzinssatz_in_jahren_numeric')
+                fixzins_display = offer.get('fixzinssatz_in_jahren_display') or "n/a"
+                
+        # Get or assign color for this bank
+        if anbieter not in bank_colors:
+            bank_colors[anbieter] = get_bank_color(anbieter)
+        color = bank_colors[anbieter]
+        
+        # Trace for fixzinssatz (solid line marker)
+                fig.add_trace(go.Scatter(
+                    x=[date],
+                    y=[offer['fixzinssatz']],
+                    mode='markers',
+            name=f'{anbieter} - Fixzins',
+            line=dict(color=color, width=2),
+            marker=dict(
+                size=14,
+                symbol='star',
+                color=color,
+                line=dict(width=2, color='black')
+            ),
+            legendgroup=anbieter,
+                    hovertemplate=(
+                f'<b>{anbieter}</b><br>'
+                        'Datum: %{x|%d.%m.%Y}<br>'
+                        f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
+                        f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
+                        f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
+                        f'Fixzinsperiode: {fixzins_display}<br>'
+                        '<extra></extra>'
+                    ),
+            visible=True,  # Visible by default
+            customdata=[[laufzeit_numeric, 'user_offer_fix', fixzins_years, anbieter]]
+                ))
+                
+        # Trace for effektivzinssatz (dashed line marker)
+                fig.add_trace(go.Scatter(
+                    x=[date],
+                    y=[offer['effektivzinssatz']],
+                    mode='markers',
+            name=f'{anbieter} - Eff. Zins',
+            line=dict(color=color, width=2, dash='dash'),
+            marker=dict(
+                size=12,
+                symbol='diamond',
+                color=color,
+                line=dict(width=2, color='black')
+            ),
+            legendgroup=anbieter,
+                    hovertemplate=(
+                f'<b>{anbieter}</b><br>'
+                        'Datum: %{x|%d.%m.%Y}<br>'
+                        f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
+                        f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
+                        f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
+                        f'Fixzinsperiode: {fixzins_display}<br>'
+                        '<extra></extra>'
+                    ),
+            visible=True,  # Visible by default
+            customdata=[[laufzeit_numeric, 'user_offer_eff', fixzins_years, anbieter]]
+                ))
+                
+    # Store trace metadata for JavaScript filtering
+    trace_metadata = []
+    for trace in fig.data:
+        if trace.customdata:
+            trace_metadata.append({
+                'laufzeit': trace.customdata[0][0],
+                'type': trace.customdata[0][1],
+                'fixierung': trace.customdata[0][2],
+                'anbieter': trace.customdata[0][3] if len(trace.customdata[0]) > 3 else None
+            })
+        else:
+            trace_metadata.append({'laufzeit': None, 'type': None, 'fixierung': None, 'anbieter': None})
+    
+    # Update layout
+    fig.update_layout(
+        title={
+            'text': '💳 Wohnkredite - Konkurrenzangebote',
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': {'size': 20, 'family': 'Segoe UI, Arial'}
+        },
+        xaxis=dict(
+            title=dict(text='Datum', font=dict(size=14, family='Segoe UI, Arial')),
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(200,200,200,0.3)',
+            tickformat='%d.%m.%Y'
+        ),
+        yaxis=dict(
+            title=dict(text='Zinssatz (%)', font=dict(size=14, family='Segoe UI, Arial')),
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='rgba(200,200,200,0.3)'
+        ),
+        hovermode='closest',
+        plot_bgcolor='rgba(250,250,250,0.9)',
+        paper_bgcolor='white',
+        font=dict(family='Segoe UI, Arial', size=12),
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=1,
+            xanchor="left",
+            x=1.02,
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="rgba(0,0,0,0.2)",
+            borderwidth=1,
+            font=dict(size=10)
+        ),
+        height=600,
+        margin=dict(l=80, r=280, t=80, b=80)
+    )
+    
+    # Convert to HTML
+    chart_html = fig.to_html(
+        include_plotlyjs='cdn',
+        div_id='plotly-individual-offers-chart',
+        config={
+            'displayModeBar': True,
+            'displaylogo': False,
+            'modeBarButtonsToRemove': ['select2d', 'lasso2d'],
+            'toImageButtonOptions': {
+                'format': 'png',
+                'filename': 'individual_offers_chart',
+                'height': 800,
+                'width': 1400,
+                'scale': 2
+            },
+            'responsive': True
+        }
+    )
+    
+    # Export chart as static PNG for email embedding using matplotlib
+    print("Exporting individual offers chart as PNG for email (using matplotlib)...")
+    try:
+        png_base64 = generate_static_png_individual_offers(user_offers, bank_colors)
+        print(f"[OK] Individual offers chart PNG saved: {INDIVIDUAL_OFFERS_CHART_PNG_PATH}")
+    except Exception as e:
+        print(f"[WARN] Warning: Could not export individual offers PNG: {e}")
+        print("   (Email version will be generated without individual offers chart)")
+        png_base64 = None
+    
+    return chart_html, laufzeit_values, fixierung_values, trace_metadata, png_base64
+
+
+def generate_static_png_individual_offers(user_offers, bank_colors):
+    """Generate static PNG chart using matplotlib for individual offers email embedding - Default: Eff. Zinssatz only"""
+    
+    # Create figure
+    plt.figure(figsize=(14, 7))
+    
+    # Group offers by bank
+    offers_by_bank = {}
+    for offer in user_offers:
+        anbieter = offer['anbieter']
+        if anbieter not in offers_by_bank:
+            offers_by_bank[anbieter] = []
+        offers_by_bank[anbieter].append(offer)
+    
+    # Plot data for each bank (only Effektiver Zinssatz)
+    for anbieter, offers in offers_by_bank.items():
+        dates = [offer['angebotsdatum'] for offer in offers]
+        eff_zins_values = [offer['effektivzinssatz'] for offer in offers]
+        color = bank_colors.get(anbieter, '#333333')
+        
+        # Sort by date
+        sorted_data = sorted(zip(dates, eff_zins_values), key=lambda x: x[0])
+        sorted_dates, sorted_values = zip(*sorted_data) if sorted_data else ([], [])
+        
+        if sorted_dates:
+            # Use scatter for marker-only visualization (no connecting lines)
+            plt.scatter(
+                sorted_dates,
+                sorted_values,
+                marker='d',
+                s=100,  # Marker size
+                color=color,
+                label=anbieter,
+                alpha=0.8,
+                edgecolors='black',
+                linewidths=1.5
+            )
+    
+    # Customize plot
+    plt.title('Wohnkredite - Konkurrenzangebote (Eff. Zinssatz)', 
+              fontsize=16, fontweight='bold', pad=15)
+    plt.xlabel('Datum', fontsize=12, fontweight='bold')
+    plt.ylabel('Zinssatz (%)', fontsize=12, fontweight='bold')
+    
+    # Format x-axis
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d.%m.%Y'))
+    plt.xticks(rotation=45)
+    
+    # Add grid
+    plt.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+    
+    # Add legend (outside plot area)
+    plt.legend(loc='center left', bbox_to_anchor=(1, 0.5), 
+               frameon=True, shadow=True, fontsize=8)
+    
+    # Set background
+    plt.gca().set_facecolor('#fafafa')
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Save to PNG file
+    plt.savefig(INDIVIDUAL_OFFERS_CHART_PNG_PATH, dpi=150, bbox_inches='tight', 
+                facecolor='white', edgecolor='none')
+    
+    # Save to bytes for base64 encoding
+    from io import BytesIO
+    buf = BytesIO()
+    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight',
+                facecolor='white', edgecolor='none')
+    buf.seek(0)
+    png_bytes = buf.read()
+    buf.close()
+    
+    # Close figure to free memory
+    plt.close()
+    
+    # Convert to base64
+    png_base64 = base64.b64encode(png_bytes).decode()
+    
+    return png_base64
 
 
 def generate_static_png_chart(df, fixierung_values, laufzeit_values, colors):
@@ -507,7 +744,7 @@ def generate_oenb_section_html(screenshots, for_email=False):
         
         oenb_html += f'''
             <div style="margin-bottom: 30px;">
-                <h3 style="color: #2c3e50; margin-bottom: 15px; font-size: 1.3em;">{chart_name}</h3>
+                <h3>{chart_name}</h3>
                 <img src="{img_src}" alt="{chart_name}" style="width: 100%; max-width: 1400px; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />
             </div>
 '''
@@ -521,12 +758,23 @@ def generate_oenb_section_html(screenshots, for_email=False):
 def generate_html():
     """Generate HTML page with interactive Plotly chart and data tables"""
     
-    # Generate chart
+    # Generate Durchblicker chart
     chart_html, laufzeit_values, fixierung_values, trace_metadata, png_base64 = generate_interactive_chart()
     
     if not chart_html:
         print("[WARN] No data found in database")
         return False, None
+    
+    # Generate individual offers chart
+    individual_chart_result = generate_individual_offers_chart()
+    if individual_chart_result[0]:
+        individual_chart_html, individual_laufzeit_values, individual_fixierung_values, individual_trace_metadata, individual_png_base64 = individual_chart_result
+    else:
+        individual_chart_html = None
+        individual_laufzeit_values = []
+        individual_fixierung_values = []
+        individual_trace_metadata = []
+        individual_png_base64 = None
     
     # Get all runs data
     runs, all_variations = get_all_runs_data()
@@ -976,10 +1224,6 @@ def generate_html():
                     <button id="btn-zinssatz" onclick="setZinssatzFilter('zinssatz')">Nur Zinssatz</button>
                     <button id="btn-effektiver" class="active" onclick="setZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
                 </div>
-                <div class="control-group">
-                    <input type="checkbox" id="show-user-offers" onchange="toggleUserOffers()" />
-                    <label for="show-user-offers" style="font-weight: bold; cursor: pointer;">Show Individual Offers</label>
-                </div>
             </div>
             
             {chart_html}
@@ -1005,46 +1249,8 @@ def generate_html():
                     
                     for (let i = 0; i < traceMetadata.length && i < data.length; i++) {{
                         const meta = traceMetadata[i];
-                        const customdata = data[i].customdata;
                         
-                        // Check if this is a user offer
-                        const isUserOffer = customdata && customdata.length > 0 && 
-                                          (customdata[0][1] === 'user_offer_fix' || customdata[0][1] === 'user_offer_eff');
-                        
-                        if (isUserOffer) {{
-                            // Handle user offers filtering
-                            // Check if checkbox is checked
-                            const checkbox = document.getElementById('show-user-offers');
-                            const showUserOffers = checkbox && checkbox.checked;
-                            
-                            if (!showUserOffers) {{
-                                visible.push(false);
-                                continue;
-                            }}
-                            
-                            // Get laufzeit and fixierung from customdata
-                            const userLaufzeit = customdata[0][0];
-                            const userFixierung = customdata[0][2];
-                            
-                            // Check Laufzeit filter for user offers
-                            const laufzeitMatch = currentLaufzeit === 'all' || userLaufzeit === parseInt(currentLaufzeit);
-                            
-                            // Check Fixierung filter for user offers
-                            const fixierungMatch = currentFixierung === 'all' || (userFixierung !== null && userFixierung === parseInt(currentFixierung));
-                            
-                            // Check Zinssatz type filter for user offers
-                            let zinssatzMatch = true;
-                            if (currentZinssatz === 'zinssatz') {{
-                                zinssatzMatch = customdata[0][1] === 'user_offer_fix';
-                            }} else if (currentZinssatz === 'effektiver') {{
-                                zinssatzMatch = customdata[0][1] === 'user_offer_eff';
-                            }}
-                            // 'beide' means both are shown, so zinssatzMatch stays true
-                            
-                            // Return true only if ALL conditions match (AND logic)
-                            visible.push(laufzeitMatch && fixierungMatch && zinssatzMatch);
-                        }} else {{
-                            // Handle scraped data filtering (existing logic)
+                        // Handle scraped data filtering (Durchblicker data only)
                             // Check Laufzeit filter
                             const laufzeitMatch = currentLaufzeit === 'all' || meta.laufzeit === parseInt(currentLaufzeit);
                             
@@ -1062,7 +1268,6 @@ def generate_html():
                             
                             // Return true only if ALL conditions match (AND logic)
                             visible.push(laufzeitMatch && fixierungMatch && zinssatzMatch);
-                        }}
                     }}
                     
                     // Update the Plotly chart
@@ -1175,12 +1380,6 @@ def generate_html():
                     applyFilters();
                 }}
                 
-                // Toggle user offers visibility
-                function toggleUserOffers() {{
-                    // Simply reapply all filters to respect current filter settings
-                    applyFilters();
-                }}
-                
                 // Mobile responsiveness for Plotly chart
                 function handleResize() {{
                     const chartDiv = document.getElementById('plotly-chart');
@@ -1222,6 +1421,150 @@ def generate_html():
                 }}, 1500);
             </script>
         </div>
+        
+{f'''
+        <div class="chart-container" style="margin-top: 50px;">
+            <div class="chart-controls">
+                <div class="control-group">
+                    <span class="control-label">Laufzeit:</span>
+                    <select id="individual-laufzeit-filter">
+                        <option value="all">Alle Laufzeiten</option>
+{f''.join([f'                        <option value="{lz}">{lz} Jahre</option>\n' for lz in individual_laufzeit_values])}                    </select>
+                </div>
+                <div class="control-group">
+                    <span class="control-label">Fixierung:</span>
+                    <select id="individual-fixierung-filter">
+                        <option value="all">Alle Fixierungen</option>
+{f''.join([f'                        <option value="{fx}">{fx} Jahre</option>\n' for fx in individual_fixierung_values])}                    </select>
+                </div>
+                <div class="control-group">
+                    <span class="control-label">Anzeigen:</span>
+                    <button id="individual-btn-beide" onclick="setIndividualZinssatzFilter('beide')">Beide</button>
+                    <button id="individual-btn-zinssatz" onclick="setIndividualZinssatzFilter('zinssatz')">Nur Zinssatz</button>
+                    <button id="individual-btn-effektiver" class="active" onclick="setIndividualZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
+                </div>
+            </div>
+            
+            {individual_chart_html if individual_chart_html else '<p style="text-align: center; color: #7f8c8d; padding: 40px;">Keine Konkurrenzangebote verfügbar</p>'}
+            
+            <script>
+                // Store trace metadata for individual offers chart
+                const individualTraceMetadata = {json.dumps(individual_trace_metadata) if individual_chart_html else '[]'};
+                
+                // Current filter states for individual offers chart
+                let individualCurrentLaufzeit = 'all';
+                let individualCurrentFixierung = 'all';
+                let individualCurrentZinssatz = 'effektiver';
+                
+                // Apply filters for individual offers chart
+                function applyIndividualFilters() {{
+                    if (!document.getElementById('plotly-individual-offers-chart')) {{
+                        return;
+                    }}
+                    
+                    const data = document.getElementById('plotly-individual-offers-chart').data;
+                    
+                    const visible = [];
+                    
+                    for (let i = 0; i < individualTraceMetadata.length && i < data.length; i++) {{
+                        const meta = individualTraceMetadata[i];
+                        
+                        // Check Laufzeit filter
+                        const laufzeitMatch = individualCurrentLaufzeit === 'all' || 
+                            (meta.laufzeit !== null && meta.laufzeit === parseInt(individualCurrentLaufzeit));
+                        
+                        // Check Fixierung filter
+                        const fixierungMatch = individualCurrentFixierung === 'all' || 
+                            (meta.fixierung !== null && meta.fixierung === parseFloat(individualCurrentFixierung));
+                        
+                        // Check Zinssatz type filter
+                        let zinssatzMatch = true;
+                        if (individualCurrentZinssatz === 'zinssatz') {{
+                            zinssatzMatch = meta.type === 'user_offer_fix';
+                        }} else if (individualCurrentZinssatz === 'effektiver') {{
+                            zinssatzMatch = meta.type === 'user_offer_eff';
+                        }}
+                        // 'beide' means both are shown, so zinssatzMatch stays true
+                        
+                        // Return true only if ALL conditions match (AND logic)
+                        visible.push(laufzeitMatch && fixierungMatch && zinssatzMatch);
+                    }}
+                    
+                    // Update the Plotly chart
+                    Plotly.restyle('plotly-individual-offers-chart', {{'visible': visible}});
+                }}
+                
+                // Mobile responsiveness for individual offers Plotly chart (same approach as Durchblicker chart)
+                function handleIndividualChartResize() {{
+                    const chartDiv = document.getElementById('plotly-individual-offers-chart');
+                    if (chartDiv && chartDiv.data) {{
+                        const isMobile = window.innerWidth <= 768;
+                        const isSmallMobile = window.innerWidth <= 480;
+                        
+                        let newHeight = 600;
+                        let newMargin = {{l: 80, r: 280, t: 80, b: 80}};
+                        let showLegend = true;
+                        
+                        if (isSmallMobile) {{
+                            newHeight = 300;
+                            newMargin = {{l: 50, r: 50, t: 60, b: 60}};
+                            showLegend = false;
+                        }} else if (isMobile) {{
+                            newHeight = 400;
+                            newMargin = {{l: 60, r: 60, t: 70, b: 70}};
+                            showLegend = false;
+                        }}
+                        
+                        Plotly.relayout('plotly-individual-offers-chart', {{
+                            height: newHeight,
+                            margin: newMargin,
+                            showlegend: showLegend
+                        }});
+                    }}
+                }}
+                
+                // Call on load and resize
+                window.addEventListener('load', handleIndividualChartResize);
+                window.addEventListener('resize', handleIndividualChartResize);
+                
+                // Laufzeit dropdown change handler for individual offers
+                const individualLaufzeitFilter = document.getElementById('individual-laufzeit-filter');
+                if (individualLaufzeitFilter) {{
+                    individualLaufzeitFilter.addEventListener('change', function(e) {{
+                        individualCurrentLaufzeit = e.target.value;
+                        applyIndividualFilters();
+                    }});
+                }}
+                
+                // Fixierung dropdown change handler for individual offers
+                const individualFixierungFilter = document.getElementById('individual-fixierung-filter');
+                if (individualFixierungFilter) {{
+                    individualFixierungFilter.addEventListener('change', function(e) {{
+                        individualCurrentFixierung = e.target.value;
+                        applyIndividualFilters();
+                    }});
+                }}
+                
+                // Zinssatz button click handler for individual offers
+                function setIndividualZinssatzFilter(type) {{
+                    individualCurrentZinssatz = type;
+                    
+                    // Update button styling
+                    document.getElementById('individual-btn-beide').classList.remove('active');
+                    document.getElementById('individual-btn-zinssatz').classList.remove('active');
+                    document.getElementById('individual-btn-effektiver').classList.remove('active');
+                    document.getElementById('individual-btn-' + type).classList.add('active');
+                    
+                    applyIndividualFilters();
+                }}
+                
+                // Apply initial filters after chart loads
+                setTimeout(() => {{
+                    applyIndividualFilters();
+                }}, 1500);
+            </script>
+        </div>
+''' if individual_chart_html else ''}
         
         <div class="table-container">
             <h2 style="color: #2c3e50; margin-bottom: 20px;">📋 Finanzierungsdetails - Aktuelle Konditionen für 25 Jahre Laufzeit</h2>
@@ -1297,10 +1640,10 @@ def generate_html():
         f.write(html_content)
     
     print(f"[OK] HTML page generated: {HTML_PATH}")
-    return True, png_base64
+    return True, png_base64, individual_png_base64
 
 
-def generate_email_html(png_base64):
+def generate_email_html(png_base64, individual_png_base64=None):
     """Generate simplified HTML for email with static PNG chart (no JavaScript)"""
     
     if not png_base64:
@@ -1394,6 +1737,18 @@ def generate_email_html(png_base64):
             text-align: center;
             margin-bottom: 10px;
             font-size: 2.2em;
+        }}
+        h2 {{
+            color: #2c3e50;
+            font-size: 1.3em;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }}
+        h3 {{
+            color: #2c3e50;
+            font-size: 1.1em;
+            margin-bottom: 12px;
+            font-weight: 600;
         }}
         .subtitle {{
             text-align: center;
@@ -1509,6 +1864,14 @@ def generate_email_html(png_base64):
                 font-size: 1.4em;
                 margin-bottom: 15px;
             }}
+            h2 {{
+                font-size: 1.0em !important;
+                margin-bottom: 10px;
+            }}
+            h3 {{
+                font-size: 0.9em !important;
+                margin-bottom: 8px;
+            }}
             .subtitle {{
                 font-size: 0.9em;
                 margin-bottom: 20px;
@@ -1573,6 +1936,21 @@ def generate_email_html(png_base64):
             .js-plotly-plot .plotly .legend {{
                 display: none !important;
             }}
+            /* Hide legend for individual offers chart on mobile */
+            #plotly-individual-offers-chart .js-plotly-plot .plotly .legend {{
+                display: none !important;
+            }}
+            /* Expand plot area when legend is hidden - adjust margins */
+            #plotly-individual-offers-chart .js-plotly-plot {{
+                width: 100% !important;
+                margin-right: 0 !important;
+            }}
+            #plotly-individual-offers-chart .js-plotly-plot .plotly {{
+                width: 100% !important;
+            }}
+            #plotly-individual-offers-chart .js-plotly-plot .plotly .main-svg {{
+                width: 100% !important;
+            }}
             table {{
                 font-size: 11px;
                 min-width: 500px;
@@ -1606,6 +1984,14 @@ def generate_email_html(png_base64):
             h1 {{
                 font-size: 1.2em;
             }}
+            h2 {{
+                font-size: 0.9em !important;
+                margin-bottom: 8px;
+            }}
+            h3 {{
+                font-size: 0.85em !important;
+                margin-bottom: 6px;
+            }}
             .chart-container {{
                 padding: 10px;
             }}
@@ -1627,6 +2013,21 @@ def generate_email_html(png_base64):
             #plotly-chart {{
                 height: 300px !important;
             }}
+            /* Hide legend for individual offers chart on small mobile */
+            #plotly-individual-offers-chart .js-plotly-plot .plotly .legend {{
+                display: none !important;
+            }}
+            /* Expand plot area when legend is hidden - adjust margins */
+            #plotly-individual-offers-chart .js-plotly-plot {{
+                width: 100% !important;
+                margin-right: 0 !important;
+            }}
+            #plotly-individual-offers-chart .js-plotly-plot .plotly {{
+                width: 100% !important;
+            }}
+            #plotly-individual-offers-chart .js-plotly-plot .plotly .main-svg {{
+                width: 100% !important;
+            }}
             table {{
                 font-size: 10px;
                 min-width: 450px;
@@ -1645,16 +2046,23 @@ def generate_email_html(png_base64):
                 </div>
         
         <a href="https://smartprototypes.net/Bank_market_overview/bank_comparison_housing_loan_durchblicker.html" class="interactive-button" target="_blank" style="background-color: #667eea !important; color: white !important; text-decoration: none !important;">
-            🔗 Go to Interactive Version
+            🔗 Zu den interaktiven Charts
         </a>
         
         <div class="chart-container">
-            <h2 style="color: #2c3e50; margin-bottom: 15px;">📊 Zinsentwicklung</h2>
+            <h2>📊 Wohnkredite - Durchblicker-Bestpreis</h2>
             <img src="data:image/png;base64,{png_base64}" alt="Housing Loan Interest Rate Chart">
         </div>
         
+{f'''
+        <div class="chart-container" style="margin-top: 40px;">
+            <h2>💳 Wohnkredite - Konkurrenzangebote</h2>
+            <img src="data:image/png;base64,{individual_png_base64}" alt="Individual Loan Offers Chart">
+        </div>
+''' if individual_png_base64 else ''}
+        
         <div class="table-container">
-            <h2 style="color: #2c3e50; margin-bottom: 20px;">📋 Finanzierungsdetails - Aktuelle Konditionen für 25 Jahre Laufzeit</h2>
+            <h2>📋 Finanzierungsdetails - Aktuelle Konditionen für 25 Jahre Laufzeit</h2>
             <table>
                 <thead>
                     <tr>
@@ -1749,16 +2157,18 @@ if __name__ == "__main__":
     
     # Generate interactive HTML (for website)
     print("[INFO] Generating interactive HTML for web...")
-    success, png_base64 = generate_html()
+    success, png_base64, individual_png_base64 = generate_html()
     
     if success:
         print("\n[SUCCESS] Interactive HTML report generated successfully!")
         print(f"   [FILE] Web HTML: {HTML_PATH}")
         print(f"   [FILE] Chart PNG: {CHART_PNG_PATH}")
+        if individual_png_base64:
+            print(f"   [FILE] Individual Offers Chart PNG: {INDIVIDUAL_OFFERS_CHART_PNG_PATH}")
         
-        # Generate email HTML (with static PNG)
+        # Generate email HTML (with static PNGs)
         print("\n[INFO] Generating email-friendly HTML...")
-        email_success = generate_email_html(png_base64)
+        email_success = generate_email_html(png_base64, individual_png_base64)
         
         if email_success:
             print("\n[SUCCESS] Email HTML report generated successfully!")
