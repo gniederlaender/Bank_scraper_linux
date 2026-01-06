@@ -318,22 +318,22 @@ def generate_individual_offers_chart():
     
     # Add traces for each offer
     for offer in user_offers:
-                anbieter = offer['anbieter']
-                date = offer['angebotsdatum']
-                laufzeit_numeric = offer.get('laufzeit_numeric')
-                fixzins_years = offer.get('fixzinssatz_in_jahren_numeric')
-                fixzins_display = offer.get('fixzinssatz_in_jahren_display') or "n/a"
-                
+        anbieter = offer['anbieter']
+        date = offer['angebotsdatum']
+        laufzeit_numeric = offer.get('laufzeit_numeric')
+        fixzins_years = offer.get('fixzinssatz_in_jahren_numeric')
+        fixzins_display = offer.get('fixzinssatz_in_jahren_display') or "n/a"
+
         # Get or assign color for this bank
         if anbieter not in bank_colors:
             bank_colors[anbieter] = get_bank_color(anbieter)
         color = bank_colors[anbieter]
-        
+
         # Trace for fixzinssatz (solid line marker)
-                fig.add_trace(go.Scatter(
-                    x=[date],
-                    y=[offer['fixzinssatz']],
-                    mode='markers',
+        fig.add_trace(go.Scatter(
+            x=[date],
+            y=[offer['fixzinssatz']],
+            mode='markers',
             name=f'{anbieter} - Fixzins',
             line=dict(color=color, width=2),
             marker=dict(
@@ -343,24 +343,24 @@ def generate_individual_offers_chart():
                 line=dict(width=2, color='black')
             ),
             legendgroup=anbieter,
-                    hovertemplate=(
+            hovertemplate=(
                 f'<b>{anbieter}</b><br>'
-                        'Datum: %{x|%d.%m.%Y}<br>'
-                        f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
-                        f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
-                        f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
-                        f'Fixzinsperiode: {fixzins_display}<br>'
-                        '<extra></extra>'
-                    ),
+                'Datum: %{x|%d.%m.%Y}<br>'
+                f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
+                f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
+                f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
+                f'Fixzinsperiode: {fixzins_display}<br>'
+                '<extra></extra>'
+            ),
             visible=True,  # Visible by default
             customdata=[[laufzeit_numeric, 'user_offer_fix', fixzins_years, anbieter]]
-                ))
-                
+        ))
+
         # Trace for effektivzinssatz (dashed line marker)
-                fig.add_trace(go.Scatter(
-                    x=[date],
-                    y=[offer['effektivzinssatz']],
-                    mode='markers',
+        fig.add_trace(go.Scatter(
+            x=[date],
+            y=[offer['effektivzinssatz']],
+            mode='markers',
             name=f'{anbieter} - Eff. Zins',
             line=dict(color=color, width=2, dash='dash'),
             marker=dict(
@@ -370,18 +370,18 @@ def generate_individual_offers_chart():
                 line=dict(width=2, color='black')
             ),
             legendgroup=anbieter,
-                    hovertemplate=(
+            hovertemplate=(
                 f'<b>{anbieter}</b><br>'
-                        'Datum: %{x|%d.%m.%Y}<br>'
-                        f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
-                        f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
-                        f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
-                        f'Fixzinsperiode: {fixzins_display}<br>'
-                        '<extra></extra>'
-                    ),
+                'Datum: %{x|%d.%m.%Y}<br>'
+                f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
+                f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
+                f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
+                f'Fixzinsperiode: {fixzins_display}<br>'
+                '<extra></extra>'
+            ),
             visible=True,  # Visible by default
             customdata=[[laufzeit_numeric, 'user_offer_eff', fixzins_years, anbieter]]
-                ))
+        ))
                 
     # Store trace metadata for JavaScript filtering
     trace_metadata = []

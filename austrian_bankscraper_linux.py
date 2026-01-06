@@ -123,10 +123,10 @@ class AustrianBankScraper:
         # Switch to enable/disable scraping for each bank
         self.enable_scraping = {
             'raiffeisen': True,
-            'bawag': False,
-            'bank99': False,
-            'erste': False,
-            'santander': False
+            'bawag': True,
+            'bank99': True,
+            'erste': True,
+            'santander': True
         }
         
         self.ua = UserAgent()
