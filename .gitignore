@@ -69,3 +69,7 @@ bank_comparison_housing_loan_durchblicker.html
 bank_comparison_housing_loan_durchblicker_email.html
 bank_comparison_consumer_loan.html
 bank_comparison_consumer_loan_email.html
+
+# Generated data files
+swap_data.js
+swap_rates_manual.json

@@ -48,8 +48,22 @@ fi
 
 echo ""
 
-# Step 3: Generate housing loan HTML report with chart
-echo "Step 3: Generating housing loan HTML report and chart..."
+# Step 3: Run OeNB Nachfrage scraper to capture dashboard charts
+echo "Step 3: Running OeNB Nachfrage scraper..."
+python3 oenb_nachfrage_scraper.py
+OENB_EXIT=$?
+
+if [ $OENB_EXIT -ne 0 ]; then
+    echo "⚠️  OeNB scraper failed with exit code: $OENB_EXIT"
+    echo "   Continuing without OeNB charts..."
+else
+    echo "✅ OeNB scraper completed successfully!"
+fi
+
+echo ""
+
+# Step 4: Generate housing loan HTML report with chart
+echo "Step 4: Generating housing loan HTML report and chart..."
 python3 generate_housing_loan_html.py
 HTML_EXIT=$?
 

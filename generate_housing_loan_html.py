@@ -690,6 +690,80 @@ def get_latest_oenb_screenshots():
     return screenshots
 
 
+def get_date_range_from_db():
+    """
+    Extract date range from housing loan database for SWAP/Euribor data fetching.
+    
+    Returns:
+        Tuple of (start_date, end_date) as datetime objects.
+        Defaults to last 12 months if no data available.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        # Check if view exists
+        cursor.execute("""
+            SELECT name FROM sqlite_master 
+            WHERE type='view' AND name='housing_loan_chart_ready'
+        """)
+        view_exists = cursor.fetchone()
+        
+        if not view_exists:
+            # Default to last 12 months
+            end_date = datetime.now().replace(day=1)
+            start_date = datetime(end_date.year - 1, end_date.month, 1)
+            print(f"[INFO] View not found, using default date range: {start_date.strftime('%Y-%m')} to {end_date.strftime('%Y-%m')}")
+            return start_date, end_date
+        
+        # Get min and max scrape dates from the view
+        cursor.execute("""
+            SELECT 
+                MIN(run_scrape_date) as min_date,
+                MAX(run_scrape_date) as max_date
+            FROM housing_loan_chart_ready
+        """)
+        
+        result = cursor.fetchone()
+        min_date_str = result[0]
+        max_date_str = result[1]
+        
+        if min_date_str and max_date_str:
+            # Parse dates (assuming ISO format or similar)
+            try:
+                min_date = datetime.fromisoformat(min_date_str.replace('Z', '+00:00'))
+                max_date = datetime.fromisoformat(max_date_str.replace('Z', '+00:00'))
+                
+                # Ensure we have at least 12 months of data
+                # If the range is shorter, extend backwards
+                if (max_date - min_date).days < 365:
+                    start_date = datetime(max_date.year - 1, max_date.month, 1)
+                    end_date = max_date.replace(day=1)
+                else:
+                    start_date = min_date.replace(day=1)
+                    end_date = max_date.replace(day=1)
+                
+                print(f"[INFO] Date range from DB: {start_date.strftime('%Y-%m')} to {end_date.strftime('%Y-%m')}")
+                return start_date, end_date
+            except (ValueError, AttributeError) as e:
+                print(f"[WARN] Could not parse dates from DB: {e}")
+        
+        # Fallback to default
+        end_date = datetime.now().replace(day=1)
+        start_date = datetime(end_date.year - 1, end_date.month, 1)
+        print(f"[INFO] Using default date range: {start_date.strftime('%Y-%m')} to {end_date.strftime('%Y-%m')}")
+        return start_date, end_date
+        
+    except Exception as e:
+        print(f"[WARN] Error extracting date range from DB: {e}")
+        # Fallback to default
+        end_date = datetime.now().replace(day=1)
+        start_date = datetime(end_date.year - 1, end_date.month, 1)
+        return start_date, end_date
+    finally:
+        conn.close()
+
+
 def image_to_base64(image_path):
     """Convert image file to base64 string"""
     try:
@@ -708,6 +782,443 @@ def image_to_base64(image_path):
     except Exception as e:
         print(f"[WARN] Could not convert {image_path} to base64: {e}")
         return None
+
+
+def generate_swap_rates_chart():
+    """
+    Generate interactive Plotly chart for SWAP rates (5Y, 10Y, 15Y, 20Y, 25Y maturities).
+    
+    Returns:
+        Tuple of (chart_html, png_base64) or (None, None) if data unavailable
+    """
+    try:
+        from swap_data_fetcher import fetch_all_rates
+        
+        # Get date range from database
+        start_date, end_date = get_date_range_from_db()
+        
+        # Fetch SWAP/Euribor data
+        print("[INFO] Fetching SWAP rates data...")
+        rate_data = fetch_all_rates(start_date, end_date)
+        
+        if not rate_data:
+            print("[WARN] No SWAP rate data available")
+            return None, None
+        
+        # Extract SWAP rates by maturity
+        swap_data_by_maturity = {
+            '5Y': [],
+            '10Y': [],
+            '15Y': [],
+            '20Y': [],
+            '25Y': []
+        }
+        
+        dates = []
+        for month_data in rate_data:
+            year = month_data['year']
+            month = month_data['month']
+            dt = datetime(year, month, 1)
+            dates.append(dt)
+            
+            rates = month_data.get('rates', {})
+            for maturity in swap_data_by_maturity.keys():
+                if maturity in rates:
+                    swap_data_by_maturity[maturity].append(rates[maturity])
+                else:
+                    swap_data_by_maturity[maturity].append(None)
+        
+        # Create Plotly figure
+        fig = go.Figure()
+        
+        # Colors for each maturity
+        colors = {
+            '5Y': '#1f77b4',   # Blue
+            '10Y': '#2ca02c',   # Green
+            '15Y': '#ff7f0e',   # Orange
+            '20Y': '#d62728',   # Red
+            '25Y': '#9467bd'    # Purple
+        }
+        
+        # Add traces for each maturity
+        for maturity in ['5Y', '10Y', '15Y', '20Y', '25Y']:
+            values = swap_data_by_maturity[maturity]
+            if any(v is not None for v in values):
+                fig.add_trace(go.Scatter(
+                    x=dates,
+                    y=values,
+                    mode='lines+markers',
+                    name=f'{maturity} SWAP',
+                    line=dict(color=colors[maturity], width=2.5),
+                    marker=dict(size=6, symbol='circle'),
+                    hovertemplate=(
+                        f'<b>{maturity} SWAP</b><br>'
+                        'Datum: %{x|%d.%m.%Y}<br>'
+                        'Zinssatz: %{y:.2f}%<br>'
+                        '<extra></extra>'
+                    )
+                ))
+        
+        # Update layout
+        fig.update_layout(
+            title={
+                'text': 'EUR SWAP Rates',
+                'x': 0.5,
+                'xanchor': 'center',
+                'font': {'size': 20, 'family': 'Segoe UI, Arial'}
+            },
+            xaxis=dict(
+                title=dict(text='Datum', font=dict(size=14, family='Segoe UI, Arial')),
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='rgba(200,200,200,0.3)',
+                tickformat='%d.%m.%Y'
+            ),
+            yaxis=dict(
+                title=dict(text='Zinssatz (%)', font=dict(size=14, family='Segoe UI, Arial')),
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='rgba(200,200,200,0.3)'
+            ),
+            hovermode='closest',
+            plot_bgcolor='rgba(250,250,250,0.9)',
+            paper_bgcolor='white',
+            font=dict(family='Segoe UI, Arial', size=12),
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02,
+                bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="rgba(0,0,0,0.2)",
+                borderwidth=1,
+                font=dict(size=10)
+            ),
+            height=500,
+            margin=dict(l=80, r=200, t=80, b=80)
+        )
+        
+        # Convert to HTML
+        chart_html = fig.to_html(
+            include_plotlyjs='cdn',
+            div_id='plotly-swap-rates-chart',
+            config={
+                'displayModeBar': True,
+                'displaylogo': False,
+                'modeBarButtonsToRemove': ['select2d', 'lasso2d'],
+                'responsive': True
+            }
+        )
+        
+        # Generate static PNG for email
+        print("[INFO] Generating SWAP rates chart PNG for email...")
+        try:
+            png_base64 = generate_static_png_swap_rates(rate_data)
+            print("[OK] SWAP rates chart PNG generated")
+        except Exception as e:
+            print(f"[WARN] Could not generate SWAP rates PNG: {e}")
+            png_base64 = None
+        
+        return chart_html, png_base64
+        
+    except ImportError as e:
+        print(f"[WARN] swap_data_fetcher not available: {e}")
+        return None, None
+    except Exception as e:
+        print(f"[WARN] Error generating SWAP rates chart: {e}")
+        return None, None
+
+
+def generate_euribor_chart():
+    """
+    Generate interactive Plotly chart for Euribor 3M.
+    
+    Returns:
+        Tuple of (chart_html, png_base64) or (None, None) if data unavailable
+    """
+    try:
+        from swap_data_fetcher import fetch_all_rates
+        
+        # Get date range from database
+        start_date, end_date = get_date_range_from_db()
+        
+        # Fetch SWAP/Euribor data
+        print("[INFO] Fetching Euribor data...")
+        rate_data = fetch_all_rates(start_date, end_date)
+        
+        if not rate_data:
+            print("[WARN] No Euribor data available")
+            return None, None
+        
+        # Extract Euribor 3M data
+        dates = []
+        euribor_values = []
+        
+        for month_data in rate_data:
+            year = month_data['year']
+            month = month_data['month']
+            dt = datetime(year, month, 1)
+            dates.append(dt)
+            
+            rates = month_data.get('rates', {})
+            if '3M' in rates:
+                euribor_values.append(rates['3M'])
+            else:
+                euribor_values.append(None)
+        
+        if not any(v is not None for v in euribor_values):
+            print("[WARN] No Euribor 3M data in fetched rates")
+            return None, None
+        
+        # Create Plotly figure
+        fig = go.Figure()
+        
+        fig.add_trace(go.Scatter(
+            x=dates,
+            y=euribor_values,
+            mode='lines+markers',
+            name='Euribor 3M',
+            line=dict(color='#1f77b4', width=2.5),
+            marker=dict(size=6, symbol='circle'),
+            hovertemplate=(
+                '<b>Euribor 3M</b><br>'
+                'Datum: %{x|%d.%m.%Y}<br>'
+                'Zinssatz: %{y:.2f}%<br>'
+                '<extra></extra>'
+            )
+        ))
+        
+        # Update layout
+        fig.update_layout(
+            title={
+                'text': 'Euribor 3M',
+                'x': 0.5,
+                'xanchor': 'center',
+                'font': {'size': 20, 'family': 'Segoe UI, Arial'}
+            },
+            xaxis=dict(
+                title=dict(text='Datum', font=dict(size=14, family='Segoe UI, Arial')),
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='rgba(200,200,200,0.3)',
+                tickformat='%d.%m.%Y'
+            ),
+            yaxis=dict(
+                title=dict(text='Zinssatz (%)', font=dict(size=14, family='Segoe UI, Arial')),
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='rgba(200,200,200,0.3)'
+            ),
+            hovermode='closest',
+            plot_bgcolor='rgba(250,250,250,0.9)',
+            paper_bgcolor='white',
+            font=dict(family='Segoe UI, Arial', size=12),
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02,
+                bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="rgba(0,0,0,0.2)",
+                borderwidth=1,
+                font=dict(size=10)
+            ),
+            height=500,
+            margin=dict(l=80, r=200, t=80, b=80)
+        )
+        
+        # Convert to HTML
+        chart_html = fig.to_html(
+            include_plotlyjs='cdn',
+            div_id='plotly-euribor-chart',
+            config={
+                'displayModeBar': True,
+                'displaylogo': False,
+                'modeBarButtonsToRemove': ['select2d', 'lasso2d'],
+                'responsive': True
+            }
+        )
+        
+        # Generate static PNG for email
+        print("[INFO] Generating Euribor chart PNG for email...")
+        try:
+            png_base64 = generate_static_png_euribor(rate_data)
+            print("[OK] Euribor chart PNG generated")
+        except Exception as e:
+            print(f"[WARN] Could not generate Euribor PNG: {e}")
+            png_base64 = None
+        
+        return chart_html, png_base64
+        
+    except ImportError as e:
+        print(f"[WARN] swap_data_fetcher not available: {e}")
+        return None, None
+    except Exception as e:
+        print(f"[WARN] Error generating Euribor chart: {e}")
+        return None, None
+
+
+def generate_static_png_swap_rates(rate_data):
+    """Generate static PNG chart for SWAP rates using matplotlib"""
+    dates = []
+    swap_data_by_maturity = {
+        '5Y': [],
+        '10Y': [],
+        '15Y': [],
+        '20Y': [],
+        '25Y': []
+    }
+    
+    for month_data in rate_data:
+        year = month_data['year']
+        month = month_data['month']
+        dt = datetime(year, month, 1)
+        dates.append(dt)
+        
+        rates = month_data.get('rates', {})
+        for maturity in swap_data_by_maturity.keys():
+            if maturity in rates:
+                swap_data_by_maturity[maturity].append(rates[maturity])
+            else:
+                swap_data_by_maturity[maturity].append(None)
+    
+    fig, ax = plt.subplots(figsize=(14, 8))
+    
+    colors = {
+        '5Y': '#1f77b4',
+        '10Y': '#2ca02c',
+        '15Y': '#ff7f0e',
+        '20Y': '#d62728',
+        '25Y': '#9467bd'
+    }
+    
+    for maturity in ['5Y', '10Y', '15Y', '20Y', '25Y']:
+        values = swap_data_by_maturity[maturity]
+        if any(v is not None for v in values):
+            ax.plot(dates, values, label=f'{maturity} SWAP', color=colors[maturity], 
+                   linewidth=2.5, marker='o', markersize=4)
+    
+    ax.set_xlabel('Datum', fontsize=12, fontfamily='Arial')
+    ax.set_ylabel('Zinssatz (%)', fontsize=12, fontfamily='Arial')
+    ax.set_title('EUR SWAP Rates', fontsize=16, fontweight='bold', fontfamily='Arial', pad=20)
+    ax.grid(True, alpha=0.3, linestyle='--')
+    ax.legend(loc='best', fontsize=10)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m.%Y'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=max(1, len(dates)//12)))
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    
+    # Convert to base64
+    from io import BytesIO
+    buf = BytesIO()
+    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    buf.seek(0)
+    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+    plt.close(fig)
+    
+    return f"data:image/png;base64,{img_base64}"
+
+
+def generate_static_png_euribor(rate_data):
+    """Generate static PNG chart for Euribor 3M using matplotlib"""
+    dates = []
+    euribor_values = []
+    
+    for month_data in rate_data:
+        year = month_data['year']
+        month = month_data['month']
+        dt = datetime(year, month, 1)
+        dates.append(dt)
+        
+        rates = month_data.get('rates', {})
+        if '3M' in rates:
+            euribor_values.append(rates['3M'])
+        else:
+            euribor_values.append(None)
+    
+    fig, ax = plt.subplots(figsize=(14, 8))
+    
+    ax.plot(dates, euribor_values, label='Euribor 3M', color='#1f77b4', 
+           linewidth=2.5, marker='o', markersize=4)
+    
+    ax.set_xlabel('Datum', fontsize=12, fontfamily='Arial')
+    ax.set_ylabel('Zinssatz (%)', fontsize=12, fontfamily='Arial')
+    ax.set_title('Euribor 3M', fontsize=16, fontweight='bold', fontfamily='Arial', pad=20)
+    ax.grid(True, alpha=0.3, linestyle='--')
+    ax.legend(loc='best', fontsize=10)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m.%Y'))
+    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=max(1, len(dates)//12)))
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    
+    # Convert to base64
+    from io import BytesIO
+    buf = BytesIO()
+    plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    buf.seek(0)
+    img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+    plt.close(fig)
+    
+    return f"data:image/png;base64,{img_base64}"
+
+
+def generate_swap_euribor_section_html(swap_chart_html, euribor_chart_html, swap_png_base64, euribor_png_base64, for_email=False):
+    """Generate HTML section for SWAP/Euribor charts
+    
+    Args:
+        swap_chart_html: Plotly HTML for SWAP rates chart (None if unavailable)
+        euribor_chart_html: Plotly HTML for Euribor chart (None if unavailable)
+        swap_png_base64: Base64 PNG for SWAP rates (for email)
+        euribor_png_base64: Base64 PNG for Euribor (for email)
+        for_email: if True, use base64 PNG; if False, use Plotly HTML
+    """
+    if not swap_chart_html and not euribor_chart_html:
+        return ""
+    
+    section_html = '''
+        <div class="swap-euribor-section" style="margin-top: 50px; padding: 25px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h2 style="color: #2c3e50; margin-bottom: 25px; font-size: 1.8em; text-align: center;">📈 Marktzinsen (SWAP & Euribor)</h2>
+'''
+    
+    if for_email:
+        # Use static PNG images for email
+        if swap_png_base64:
+            section_html += f'''
+            <div style="margin-bottom: 30px;">
+                <h3 style="color: #1b5e20; margin-bottom: 15px;">EUR SWAP Rates</h3>
+                <img src="{swap_png_base64}" alt="EUR SWAP Rates" style="width: 100%; max-width: 1400px; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />
+            </div>
+'''
+        if euribor_png_base64:
+            section_html += f'''
+            <div style="margin-bottom: 30px;">
+                <h3 style="color: #1b5e20; margin-bottom: 15px;">Euribor 3M</h3>
+                <img src="{euribor_png_base64}" alt="Euribor 3M" style="width: 100%; max-width: 1400px; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />
+            </div>
+'''
+    else:
+        # Use interactive Plotly charts for web
+        if swap_chart_html:
+            section_html += f'''
+            <div style="margin-bottom: 30px;">
+                <h3 style="color: #1b5e20; margin-bottom: 15px;">EUR SWAP Rates</h3>
+                {swap_chart_html}
+            </div>
+'''
+        if euribor_chart_html:
+            section_html += f'''
+            <div style="margin-bottom: 30px;">
+                <h3 style="color: #1b5e20; margin-bottom: 15px;">Euribor 3M</h3>
+                {euribor_chart_html}
+            </div>
+'''
+    
+    section_html += '''
+        </div>
+'''
+    return section_html
 
 
 def generate_oenb_section_html(screenshots, for_email=False):
@@ -781,6 +1292,21 @@ def generate_html():
     
     # Get latest OeNB screenshots
     oenb_screenshots = get_latest_oenb_screenshots()
+    
+    # Generate SWAP/Euribor charts
+    print("[INFO] Generating SWAP/Euribor charts...")
+    swap_chart_result = generate_swap_rates_chart()
+    euribor_chart_result = generate_euribor_chart()
+    
+    if swap_chart_result[0]:
+        swap_chart_html, swap_png_base64 = swap_chart_result
+    else:
+        swap_chart_html, swap_png_base64 = None, None
+    
+    if euribor_chart_result[0]:
+        euribor_chart_html, euribor_png_base64 = euribor_chart_result
+    else:
+        euribor_chart_html, euribor_png_base64 = None, None
     
     if not runs:
         print("[WARN] No data found in database")
@@ -1625,6 +2151,12 @@ def generate_html():
     oenb_section_html = generate_oenb_section_html(oenb_screenshots)
     html_content += oenb_section_html
     
+    # Add SWAP/Euribor section if charts are available
+    swap_euribor_section_html = generate_swap_euribor_section_html(
+        swap_chart_html, euribor_chart_html, swap_png_base64, euribor_png_base64, for_email=False
+    )
+    html_content += swap_euribor_section_html
+    
     html_content += f'''
         <div class="timestamp">
             Last Updated: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}<br>
@@ -1659,6 +2191,21 @@ def generate_email_html(png_base64, individual_png_base64=None):
     
     # Get latest OeNB screenshots
     oenb_screenshots = get_latest_oenb_screenshots()
+    
+    # Generate SWAP/Euribor charts for email
+    print("[INFO] Generating SWAP/Euribor charts for email...")
+    swap_chart_result = generate_swap_rates_chart()
+    euribor_chart_result = generate_euribor_chart()
+    
+    if swap_chart_result[0]:
+        swap_chart_html, swap_png_base64 = swap_chart_result
+    else:
+        swap_chart_html, swap_png_base64 = None, None
+    
+    if euribor_chart_result[0]:
+        euribor_chart_html, euribor_png_base64 = euribor_chart_result
+    else:
+        euribor_chart_html, euribor_png_base64 = None, None
     
     # Get 25J run for table display (default)
     latest_run = None
@@ -2123,6 +2670,12 @@ def generate_email_html(png_base64, individual_png_base64=None):
     # Add OeNB section if screenshots are available (for email, use base64)
     oenb_section_html = generate_oenb_section_html(oenb_screenshots, for_email=True)
     html_content += oenb_section_html
+    
+    # Add SWAP/Euribor section if charts are available (for email, use base64 PNG)
+    swap_euribor_section_html = generate_swap_euribor_section_html(
+        swap_chart_html, euribor_chart_html, swap_png_base64, euribor_png_base64, for_email=True
+    )
+    html_content += swap_euribor_section_html
     
     html_content += '''
     </div>
