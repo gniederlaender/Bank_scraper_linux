@@ -62,6 +62,22 @@ fi
 
 echo ""
 
+# Step 3b: Fetch and update SWAP rates
+echo "Step 3b: Fetching SWAP rates and Euribor data..."
+SWAP_START=$(date -d "3 years ago" +%Y-%m)
+SWAP_END=$(date +%Y-%m)
+python3 swap_data_fetcher.py --start "$SWAP_START" --end "$SWAP_END" --output swap_data.js
+SWAP_EXIT=$?
+
+if [ $SWAP_EXIT -ne 0 ]; then
+    echo "⚠️  SWAP rate fetch failed (exit code: $SWAP_EXIT)"
+    echo "   Continuing with existing swap_data.js if available..."
+else
+    echo "✅ SWAP rates updated successfully! ($SWAP_START to $SWAP_END)"
+fi
+
+echo ""
+
 # Step 4: Generate housing loan HTML report with chart
 echo "Step 4: Generating housing loan HTML report and chart..."
 python3 generate_housing_loan_html.py
