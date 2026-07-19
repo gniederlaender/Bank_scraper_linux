@@ -48,6 +48,23 @@ fi
 
 echo ""
 
+# Step 2b: Update SWAP/Euribor rates from ECB and Sparkasse APIs
+echo "Step 2b: Updating SWAP/Euribor rates..."
+# Calculate date range: 12 months back to current month
+START_DATE=$(date -d "12 months ago" +%Y-%m)
+END_DATE=$(date +%Y-%m)
+python3 swap_data_fetcher.py --start "$START_DATE" --end "$END_DATE" --output swap_data.js
+SWAP_EXIT=$?
+
+if [ $SWAP_EXIT -ne 0 ]; then
+    echo "⚠️  SWAP/Euribor rates update failed (exit code: $SWAP_EXIT)"
+    echo "   Continuing with cached rates..."
+else
+    echo "✅ SWAP/Euribor rates updated successfully!"
+fi
+
+echo ""
+
 # Step 3: Run OeNB Nachfrage scraper to capture dashboard charts
 echo "Step 3: Running OeNB Nachfrage scraper..."
 python3 oenb_nachfrage_scraper.py
@@ -247,6 +264,7 @@ echo "📊 Housing Loan (Wohnkredit) Output Files:"
 echo "  📄 HTML: /opt/Bankcomparison/bank_comparison_housing_loan_durchblicker.html"
 echo "  🌐 Web:  http://smartprototypes.net/Bank_market_overview/bank_comparison_housing_loan_durchblicker.html"
 echo "  🗄️  Database: /opt/Bankcomparison/austrian_banks_housing_loan.db"
+echo "  📈 SWAP Rates: /opt/Bankcomparison/swap_data.js (auto-updated from ECB/Sparkasse)"
 echo ""
 echo "💳 Consumer Loan (Konsumkredit) Output Files:"
 echo "  📄 HTML: /opt/Bankcomparison/bank_comparison_consumer_loan.html"
