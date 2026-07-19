@@ -68,10 +68,11 @@ def generate_interactive_chart():
     # Define colors for each bank
     colors = {
         'raiffeisen': '#1f77b4',   # Blue
-        'bawag': '#ff7f0e',          # Orange
-        'bank99': '#2ca02c',         # Green
-        'erste': '#d62728',          # Red
-        'santander': '#9467bd'       # Purple
+        'bawag': '#ff7f0e',        # Orange
+        'bank99': '#2ca02c',       # Green
+        'erste': '#d62728',        # Red
+        'santander': '#9467bd',    # Purple
+        'bankaustria': '#e31937'   # Bank Austria / UniCredit Red
     }
     
     # Get unique banks
@@ -214,17 +215,27 @@ def generate_interactive_chart():
 
 
 def generate_static_png_chart(df, bank_names, colors):
-    """Generate static PNG chart using matplotlib for email embedding - Default: Eff. Zinssatz only"""
-    
+    """Generate static PNG chart using matplotlib for email embedding - Default: Eff. Zinssatz only, last 12 months"""
+
+    from datetime import timedelta
+
+    # Filter to last 12 months
+    twelve_months_ago = datetime.now() - timedelta(days=365)
+    df_filtered = df[df['date_scraped'] >= twelve_months_ago].copy()
+
+    if df_filtered.empty:
+        print("[WARN] No data in last 12 months, using all available data")
+        df_filtered = df.copy()
+
     # Create figure
     plt.figure(figsize=(14, 7))
-    
+
     # Default: Only show Effektiver Zinssatz
     show_rate = False  # Only show Effektiver Zinssatz
-    
+
     # Plot data for each bank
     for bank in bank_names:
-        data = df[df['bank_name'] == bank].copy()
+        data = df_filtered[df_filtered['bank_name'] == bank].copy()
         
         if data.empty:
             continue
@@ -245,8 +256,10 @@ def generate_static_png_chart(df, bank_names, colors):
             alpha=0.8
         )
     
-    # Customize plot
-    plt.title('Konsumkredit Zinsentwicklung (Effektiver Zinssatz)', 
+    # Customize plot with date range in title
+    date_from = twelve_months_ago.strftime('%d.%m.%Y')
+    date_to = datetime.now().strftime('%d.%m.%Y')
+    plt.title(f'Konsumkredit Zinsentwicklung ({date_from} - {date_to})',
               fontsize=16, fontweight='bold', pad=15)
     plt.xlabel('Datum', fontsize=12, fontweight='bold')
     plt.ylabel('Zinssatz (%)', fontsize=12, fontweight='bold')

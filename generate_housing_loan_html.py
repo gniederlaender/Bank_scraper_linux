@@ -156,7 +156,7 @@ def generate_interactive_chart():
                 marker=dict(size=8, symbol='circle'),
                 legendgroup=f'fixierung_{fixierung}_laufzeit_{laufzeit}',
                 hovertemplate=(
-                    f'<b>Fixierung: {fixierung} Jahre</b><br>'
+                    f'<b>Fixlaufzeit: {fixierung} Jahre</b><br>'
                     f'Laufzeit: {laufzeit} Jahre<br>'
                     'Datum: %{x|%d.%m.%Y}<br>'
                     'Zinssatz: %{y:.3f}%<br>'
@@ -176,7 +176,7 @@ def generate_interactive_chart():
                 marker=dict(size=7, symbol='square'),
                 legendgroup=f'fixierung_{fixierung}_laufzeit_{laufzeit}',
                 hovertemplate=(
-                    f'<b>Fixierung: {fixierung} Jahre</b><br>'
+                    f'<b>Fixlaufzeit: {fixierung} Jahre</b><br>'
                     f'Laufzeit: {laufzeit} Jahre<br>'
                     'Datum: %{x|%d.%m.%Y}<br>'
                     'Eff. Zinssatz: %{y:.3f}%<br>'
@@ -469,19 +469,32 @@ def generate_individual_offers_chart():
 
 
 def generate_static_png_individual_offers(user_offers, bank_colors):
-    """Generate static PNG chart using matplotlib for individual offers email embedding - Default: Eff. Zinssatz only"""
-    
+    """Generate static PNG chart using matplotlib for individual offers email embedding - Default: Eff. Zinssatz only, last 12 months"""
+
+    from datetime import timedelta
+
+    # Filter to last 12 months
+    twelve_months_ago = datetime.now() - timedelta(days=365)
+    filtered_offers = [
+        offer for offer in user_offers
+        if offer.get('angebotsdatum') and offer['angebotsdatum'] >= twelve_months_ago
+    ]
+
+    if not filtered_offers:
+        print("[WARN] No individual offers in last 12 months, using all available data")
+        filtered_offers = user_offers
+
     # Create figure
     plt.figure(figsize=(14, 7))
-    
+
     # Group offers by bank
     offers_by_bank = {}
-    for offer in user_offers:
+    for offer in filtered_offers:
         anbieter = offer['anbieter']
         if anbieter not in offers_by_bank:
             offers_by_bank[anbieter] = []
         offers_by_bank[anbieter].append(offer)
-    
+
     # Plot data for each bank (only Effektiver Zinssatz)
     for anbieter, offers in offers_by_bank.items():
         dates = [offer['angebotsdatum'] for offer in offers]
@@ -506,31 +519,33 @@ def generate_static_png_individual_offers(user_offers, bank_colors):
                 linewidths=1.5
             )
     
-    # Customize plot
-    plt.title('Wohnkredite - Konkurrenzangebote (Eff. Zinssatz)', 
+    # Customize plot with date range in title
+    date_from = twelve_months_ago.strftime('%d.%m.%Y')
+    date_to = datetime.now().strftime('%d.%m.%Y')
+    plt.title(f'Wohnkredite - Konkurrenzangebote ({date_from} - {date_to})',
               fontsize=16, fontweight='bold', pad=15)
     plt.xlabel('Datum', fontsize=12, fontweight='bold')
     plt.ylabel('Zinssatz (%)', fontsize=12, fontweight='bold')
-    
+
     # Format x-axis
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d.%m.%Y'))
     plt.xticks(rotation=45)
-    
+
     # Add grid
     plt.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
-    
+
     # Add legend (outside plot area)
-    plt.legend(loc='center left', bbox_to_anchor=(1, 0.5), 
+    plt.legend(loc='center left', bbox_to_anchor=(1, 0.5),
                frameon=True, shadow=True, fontsize=8)
-    
+
     # Set background
     plt.gca().set_facecolor('#fafafa')
-    
+
     # Adjust layout
     plt.tight_layout()
-    
+
     # Save to PNG file
-    plt.savefig(INDIVIDUAL_OFFERS_CHART_PNG_PATH, dpi=150, bbox_inches='tight', 
+    plt.savefig(INDIVIDUAL_OFFERS_CHART_PNG_PATH, dpi=150, bbox_inches='tight',
                 facecolor='white', edgecolor='none')
     
     # Save to bytes for base64 encoding
@@ -552,20 +567,30 @@ def generate_static_png_individual_offers(user_offers, bank_colors):
 
 
 def generate_static_png_chart(df, fixierung_values, laufzeit_values, colors):
-    """Generate static PNG chart using matplotlib for email embedding - Default: 25J and Eff. Zinssatz only"""
-    
+    """Generate static PNG chart using matplotlib for email embedding - Default: 25J and Eff. Zinssatz only, last 12 months"""
+
+    from datetime import timedelta
+
+    # Filter to last 12 months
+    twelve_months_ago = datetime.now() - timedelta(days=365)
+    df_filtered = df[df['scrape_timestamp'] >= twelve_months_ago].copy()
+
+    if df_filtered.empty:
+        print("[WARN] No data in last 12 months, using all available data")
+        df_filtered = df.copy()
+
     # Create figure
     plt.figure(figsize=(14, 7))
-    
+
     # Default: Only show 25J Laufzeit and Effektiver Zinssatz
     target_laufzeit = 25
     show_zinssatz = False  # Only show Effektiver Zinssatz
-    
-    # Plot data for each Fixierung (only for 25J Laufzeit)
+
+    # Plot data for each Fixlaufzeit (only for 25J Laufzeit)
     for fixierung in fixierung_values:
-        # Filter data for this combination (only 25J Laufzeit)
-        mask = (df['fixierung_jahre'] == fixierung) & (df['run_laufzeit_jahre'] == target_laufzeit)
-        data = df[mask].copy()
+        # Filter data for this combination (only 25J Laufzeit) from filtered dataframe
+        mask = (df_filtered['fixierung_jahre'] == fixierung) & (df_filtered['run_laufzeit_jahre'] == target_laufzeit)
+        data = df_filtered[mask].copy()
         
         if data.empty:
             continue
@@ -586,8 +611,10 @@ def generate_static_png_chart(df, fixierung_values, laufzeit_values, colors):
             alpha=0.8
         )
     
-    # Customize plot
-    plt.title('Immobilienkredit Zinsentwicklung - 25 Jahre Laufzeit (Eff. Zinssatz)', 
+    # Customize plot with date range in title
+    date_from = twelve_months_ago.strftime('%d.%m.%Y')
+    date_to = datetime.now().strftime('%d.%m.%Y')
+    plt.title(f'Wohnkredit Zinsentwicklung - 25J Laufzeit ({date_from} - {date_to})',
               fontsize=16, fontweight='bold', pad=15)
     plt.xlabel('Datum', fontsize=12, fontweight='bold')
     plt.ylabel('Zinssatz (%)', fontsize=12, fontweight='bold')
@@ -1739,9 +1766,9 @@ def generate_html():
 {f''.join([f'                        <option value="{lz}"{" selected" if lz == 25 else ""}>{lz} Jahre</option>\n' for lz in laufzeit_values])}                    </select>
                 </div>
                 <div class="control-group">
-                    <span class="control-label">Fixierung:</span>
+                    <span class="control-label">Fixlaufzeit:</span>
                     <select id="fixierung-filter">
-                        <option value="all">Alle Fixierungen</option>
+                        <option value="all">Alle Fixlaufzeiten</option>
 {f''.join([f'                        <option value="{fx}">{fx} Jahre</option>\n' for fx in fixierung_values])}                    </select>
                 </div>
                 <div class="control-group">
@@ -1958,9 +1985,9 @@ def generate_html():
 {f''.join([f'                        <option value="{lz}">{lz} Jahre</option>\n' for lz in individual_laufzeit_values])}                    </select>
                 </div>
                 <div class="control-group">
-                    <span class="control-label">Fixierung:</span>
+                    <span class="control-label">Fixlaufzeit:</span>
                     <select id="individual-fixierung-filter">
-                        <option value="all">Alle Fixierungen</option>
+                        <option value="all">Alle Fixlaufzeiten</option>
 {f''.join([f'                        <option value="{fx}">{fx} Jahre</option>\n' for fx in individual_fixierung_values])}                    </select>
                 </div>
                 <div class="control-group">
@@ -2091,13 +2118,111 @@ def generate_html():
             </script>
         </div>
 ''' if individual_chart_html else ''}
-        
+
+        <!-- Angebotserfassung Formular -->
+        <div class="form-container" style="margin-top: 40px; padding: 30px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; border: 1px solid #dee2e6;">
+            <h2 style="color: #2c3e50; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
+                ➕ Neues Konkurrenzangebot erfassen
+            </h2>
+            <form id="offer-form" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+                <div class="form-group">
+                    <label for="anbieter" style="display: block; margin-bottom: 5px; font-weight: 600; color: #495057;">Bank/Anbieter *</label>
+                    <input type="text" id="anbieter" name="anbieter" required
+                           style="width: 100%; padding: 10px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px;"
+                           placeholder="z.B. Raiffeisen, Volksbank...">
+                </div>
+                <div class="form-group">
+                    <label for="angebotsdatum" style="display: block; margin-bottom: 5px; font-weight: 600; color: #495057;">Angebotsdatum *</label>
+                    <input type="date" id="angebotsdatum" name="angebotsdatum" required
+                           style="width: 100%; padding: 10px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px;">
+                </div>
+                <div class="form-group">
+                    <label for="fixzinssatz" style="display: block; margin-bottom: 5px; font-weight: 600; color: #495057;">Fixzinssatz (%)</label>
+                    <input type="number" id="fixzinssatz" name="fixzinssatz" step="0.001" min="0" max="20"
+                           style="width: 100%; padding: 10px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px;"
+                           placeholder="z.B. 3.250">
+                </div>
+                <div class="form-group">
+                    <label for="effektivzinssatz" style="display: block; margin-bottom: 5px; font-weight: 600; color: #495057;">Effektivzinssatz (%)</label>
+                    <input type="number" id="effektivzinssatz" name="effektivzinssatz" step="0.001" min="0" max="20"
+                           style="width: 100%; padding: 10px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px;"
+                           placeholder="z.B. 3.450">
+                </div>
+                <div class="form-group">
+                    <label for="laufzeit" style="display: block; margin-bottom: 5px; font-weight: 600; color: #495057;">Laufzeit (Jahre)</label>
+                    <input type="number" id="laufzeit" name="laufzeit" min="1" max="40"
+                           style="width: 100%; padding: 10px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px;"
+                           placeholder="z.B. 25">
+                </div>
+                <div class="form-group">
+                    <label for="fixzinssatz_in_jahren" style="display: block; margin-bottom: 5px; font-weight: 600; color: #495057;">Fixlaufzeit (Jahre)</label>
+                    <input type="number" id="fixzinssatz_in_jahren" name="fixzinssatz_in_jahren" min="0" max="40"
+                           style="width: 100%; padding: 10px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px;"
+                           placeholder="z.B. 10">
+                </div>
+                <div class="form-group" style="grid-column: 1 / -1; display: flex; gap: 15px; align-items: center;">
+                    <button type="submit" id="submit-btn"
+                            style="padding: 12px 30px; background: linear-gradient(135deg, #28a745 0%, #218838 100%); color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;">
+                        💾 Angebot speichern
+                    </button>
+                    <span id="form-status" style="color: #6c757d; font-size: 14px;"></span>
+                </div>
+            </form>
+        </div>
+
+        <script>
+            // Offer form submission handler
+            document.getElementById('offer-form').addEventListener('submit', async function(e) {{
+                e.preventDefault();
+
+                const submitBtn = document.getElementById('submit-btn');
+                const statusSpan = document.getElementById('form-status');
+
+                submitBtn.disabled = true;
+                submitBtn.textContent = '⏳ Speichern...';
+                statusSpan.textContent = '';
+
+                const formData = new FormData(e.target);
+                const data = Object.fromEntries(formData.entries());
+
+                try {{
+                    const response = await fetch('http://localhost:5001/api/offers', {{
+                        method: 'POST',
+                        headers: {{'Content-Type': 'application/json'}},
+                        body: JSON.stringify(data)
+                    }});
+
+                    const result = await response.json();
+
+                    if (response.ok) {{
+                        statusSpan.style.color = '#28a745';
+                        statusSpan.textContent = '✅ ' + result.message + ' (ID: ' + result.id + ')';
+                        e.target.reset();
+                        // Set today's date as default
+                        document.getElementById('angebotsdatum').valueAsDate = new Date();
+                    }} else {{
+                        statusSpan.style.color = '#dc3545';
+                        statusSpan.textContent = '❌ Fehler: ' + result.message;
+                    }}
+                }} catch (error) {{
+                    statusSpan.style.color = '#dc3545';
+                    statusSpan.textContent = '❌ Server nicht erreichbar. Bitte starten Sie den API-Server (python3 offer_api.py)';
+                }}
+
+                submitBtn.disabled = false;
+                submitBtn.textContent = '💾 Angebot speichern';
+            }});
+
+            // Set today's date as default
+            document.getElementById('angebotsdatum').valueAsDate = new Date();
+        </script>
+
         <div class="table-container">
             <h2 style="color: #2c3e50; margin-bottom: 20px;">📋 Finanzierungsdetails - Aktuelle Konditionen für 25 Jahre Laufzeit</h2>
             <table>
                 <thead>
                     <tr>
-                        <th>Fixierung</th>
+                        <th>Fixlaufzeit</th>
                         <th>Monatliche Rate</th>
                         <th>Zinssatz</th>
                         <th>Effektiver Zinssatz</th>
@@ -2613,7 +2738,7 @@ def generate_email_html(png_base64, individual_png_base64=None):
             <table>
                 <thead>
                     <tr>
-                        <th>Fixierung</th>
+                        <th>Fixlaufzeit</th>
                         <th>Monatliche Rate</th>
                         <th>Zinssatz</th>
                         <th>Effektiver Zinssatz</th>

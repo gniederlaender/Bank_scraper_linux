@@ -311,6 +311,79 @@ def print_database_summary(db_path: Path = DB_PATH) -> None:
     print("="*60 + "\n")
 
 
+def ensure_loan_offers_table(db_path: Path = DB_PATH) -> None:
+    """
+    Create the loan_offers table if it doesn't exist.
+    """
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS loan_offers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            anbieter TEXT NOT NULL,
+            angebotsdatum TEXT NOT NULL,
+            fixzinssatz TEXT,
+            effektivzinssatz TEXT,
+            laufzeit TEXT,
+            fixzinssatz_in_jahren TEXT,
+            fileName TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+    print(f"[INFO] loan_offers table ensured in {db_path}")
+
+
+def insert_loan_offer(offer_data: Dict[str, Any], db_path: Path = DB_PATH) -> int:
+    """
+    Insert a new loan offer into the database.
+
+    Args:
+        offer_data: Dictionary with offer fields:
+            - anbieter (required): Bank/provider name
+            - angebotsdatum (required): Offer date in DD.MM.YYYY format
+            - fixzinssatz: Fixed interest rate (e.g., "2,650%")
+            - effektivzinssatz: Effective interest rate (e.g., "3,30%")
+            - laufzeit: Loan duration (e.g., "30 Jahre")
+            - fixzinssatz_in_jahren: Fixed rate period (e.g., "10 Jahre")
+            - fileName: Source file name (optional)
+        db_path: Path to database file
+
+    Returns:
+        int: ID of the newly inserted offer
+    """
+    # Ensure table exists
+    ensure_loan_offers_table(db_path)
+
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO loan_offers (
+            anbieter, angebotsdatum, fixzinssatz, effektivzinssatz,
+            laufzeit, fixzinssatz_in_jahren, fileName
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        offer_data.get('anbieter'),
+        offer_data.get('angebotsdatum'),
+        offer_data.get('fixzinssatz'),
+        offer_data.get('effektivzinssatz'),
+        offer_data.get('laufzeit'),
+        offer_data.get('fixzinssatz_in_jahren'),
+        offer_data.get('fileName', 'manual_entry')
+    ))
+
+    new_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+
+    print(f"[INFO] Inserted loan offer with ID: {new_id}")
+    return new_id
+
+
 def get_all_loan_offers(db_path: Path = DB_PATH) -> List[Dict[str, Any]]:
     """
     Retrieve all user loan offers from loan_offers table and parse German formats.

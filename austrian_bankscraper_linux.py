@@ -73,6 +73,10 @@ class AustrianBankScraper:
             'santander': {
                 'url': 'https://www.santanderconsumer.at/',
                 'interest_rates_url': 'https://website-public-api.santanderconsumer.at/api/public'
+            },
+            'bankaustria': {
+                'url': 'https://openproduct.bankaustria.at/workflow/CFN',
+                'interest_rates_url': 'https://openproduct.bankaustria.at/workflow/CFN'
             }
         }
         
@@ -117,6 +121,14 @@ class AustrianBankScraper:
                 'vertragslaufzeit': 'duration',  # API field name
                 'gesamtbetrag': 'total_amount',  # API field name
                 'monatliche_rate': 'rate'  # API field name
+            },
+            'bankaustria': {
+                'sollzinssatz': 'Sollzinssatz',
+                'effektiver_jahreszins': 'Effektivzinssatz',
+                'nettokreditbetrag': 'Kreditbetrag',
+                'vertragslaufzeit': 'Laufzeit',
+                'gesamtbetrag': 'Gesamtbetrag',
+                'monatliche_rate': 'Monatliche Rate'
             }
         }
         
@@ -126,7 +138,8 @@ class AustrianBankScraper:
             'bawag': True,
             'bank99': True,
             'erste': True,
-            'santander': True
+            'santander': True,
+            'bankaustria': True
         }
         
         self.ua = UserAgent()
@@ -742,7 +755,106 @@ class AustrianBankScraper:
                     f"API Response: {response.text if 'response' in locals() else 'No response'}",
                     min_betrag, max_betrag, min_laufzeit, max_laufzeit
                 )
-            
+
+            elif bank_name == 'bankaustria':
+                # Bank Austria Consumer Loan (Konsumkredit) - SPA scraping
+                logger.info(f"Scraping Bank Austria consumer loan page...")
+
+                sollzinssatz = effektiver_jahreszins = nettokreditbetrag = vertragslaufzeit = gesamtbetrag = monatliche_rate = None
+                min_betrag = max_betrag = min_laufzeit = max_laufzeit = None
+
+                try:
+                    # Wait for page to load (SPA)
+                    time.sleep(5)
+
+                    # Try to find and set the loan amount input (10000 EUR)
+                    try:
+                        # Look for amount input field
+                        amount_input = WebDriverWait(self.driver, 10).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='number'], input[type='text'][name*='amount'], input[data-testid*='amount']"))
+                        )
+                        amount_input.clear()
+                        amount_input.send_keys("10000")
+                        logger.info("Bank Austria: Set loan amount to 10000")
+                        time.sleep(2)
+                    except Exception as e:
+                        logger.warning(f"Bank Austria: Could not find amount input: {e}")
+
+                    # Try to find duration input/slider (60 months)
+                    try:
+                        duration_input = self.driver.find_element(By.CSS_SELECTOR, "input[name*='duration'], input[data-testid*='duration'], input[name*='laufzeit']")
+                        duration_input.clear()
+                        duration_input.send_keys("60")
+                        logger.info("Bank Austria: Set duration to 60 months")
+                        time.sleep(2)
+                    except Exception as e:
+                        logger.warning(f"Bank Austria: Could not find duration input: {e}")
+
+                    # Wait for calculation to update
+                    time.sleep(3)
+
+                    # Try to extract the displayed rate information from the page
+                    page_text = self.driver.find_element(By.TAG_NAME, "body").text
+
+                    # Parse interest rates from page text using regex
+                    # Look for patterns like "9,90 %" or "9.90%"
+                    rate_patterns = [
+                        r'(?:Sollzinssatz|Nominalzins)[:\s]*(\d+[.,]\d+)\s*%',
+                        r'(?:Effektiv|eff\.?\s*Jahreszins)[:\s]*(\d+[.,]\d+)\s*%',
+                        r'(\d+[.,]\d+)\s*%\s*(?:p\.?\s*a\.?|effektiv)',
+                    ]
+
+                    for pattern in rate_patterns:
+                        match = re.search(pattern, page_text, re.IGNORECASE)
+                        if match:
+                            rate_value = match.group(1).replace(',', '.')
+                            if 'effektiv' in pattern.lower():
+                                effektiver_jahreszins = f"{rate_value} %"
+                            else:
+                                sollzinssatz = f"{rate_value} %"
+                            logger.info(f"Bank Austria: Found rate from pattern: {match.group(0)}")
+
+                    # Look for monthly rate
+                    rate_match = re.search(r'(?:Monatliche?\s*Rate|Rate)[:\s]*€?\s*(\d+[.,]\d+)', page_text, re.IGNORECASE)
+                    if rate_match:
+                        monatliche_rate = f"{rate_match.group(1).replace(',', '.')} EUR"
+                        logger.info(f"Bank Austria: Found monthly rate: {monatliche_rate}")
+
+                    # Default values if not found
+                    nettokreditbetrag = "10.000 EUR"
+                    vertragslaufzeit = "60 Monate"
+
+                    # Take a debug screenshot
+                    self.driver.save_screenshot(f"bankaustria_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
+
+                    logger.info(f"Bank Austria extracted - sollzinssatz: {sollzinssatz}, effektiver: {effektiver_jahreszins}, rate: {monatliche_rate}")
+
+                except Exception as e:
+                    logger.error(f"Error scraping Bank Austria: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+                    # Take error screenshot
+                    try:
+                        self.driver.save_screenshot(f"bankaustria_error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
+                    except:
+                        pass
+
+                # Store the extracted fields in the database
+                self.store_interest_rate(
+                    bank_name,
+                    'Konsumkredit',
+                    sollzinssatz,
+                    'EUR',
+                    self.banks[bank_name]['url'],
+                    nettokreditbetrag,
+                    gesamtbetrag,
+                    vertragslaufzeit,
+                    effektiver_jahreszins,
+                    monatliche_rate,
+                    f"Page text excerpt: {page_text[:500] if 'page_text' in locals() else 'No text'}",
+                    min_betrag, max_betrag, min_laufzeit, max_laufzeit
+                )
+
         except Exception as e:
             logger.error(f"Error scraping interest rates for {bank_name}: {str(e)}")
             # Take a screenshot for debugging
