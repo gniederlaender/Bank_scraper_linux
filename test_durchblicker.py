@@ -1,14 +1,38 @@
+"""Durchblicker.at housing loan (Immokredit) scraper — direct API approach.
+
+Durchblicker rebuilt their Kreditrechner frontend (Next.js widget + wizard),
+which broke the previous Playwright-based UI automation. Instead of driving
+the form, this scraper calls the calculation API the wizard itself uses:
+
+    POST https://durchblicker.at/api/0.2/tariff-calculate/immokredit
+
+The endpoint accepts the full wizard input as JSON and synchronously returns
+the best-offer calculation (Rate, Sollzins, Effektivzins, Anschlusskondition,
+Auszahlungsbetrag, eingerechnete Kosten, Gesamtbelastung, Besicherung) —
+no browser, no cookie banner, no captcha required.
+
+The household/project parameters below mirror the values the old UI scraper
+entered, so the stored time series stays comparable:
+  Kaufpreis 500.000, Nebenkosten 50.000, Eigenmittel 150.000 (=> Finanzierung
+  400.000), Wohnung/fertig/Wien/Eigennutzung, 1 Kreditnehmer, 45 Jahre,
+  Einkommen 8.500, Nutzflaeche 100 m2, bestehende Kreditraten 300.
+
+For each Laufzeit in LAUFZEITEN_TO_SCRAPE all Fixierung variants
+(0 = variabel, then 5, 10, ... up to Laufzeit) are calculated and written to
+the database in the same format the previous scraper produced, so
+create_housing_loan_view.py / generate_housing_loan_html.py keep working.
+"""
+
 from __future__ import annotations
 
+import copy
 import sys
-import os
 import time
 from datetime import datetime
-import re
-from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
 
-from playwright.sync_api import Playwright, sync_playwright, TimeoutError as PlaywrightTimeoutError
+import requests
+
 from db_helper import save_scraping_data
 
 # Try to load dotenv if available
@@ -16,977 +40,355 @@ try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
-    pass  # dotenv not available, will use environment variables
+    pass
 
-# Get screenshot directory from environment or use relative path
-BASE_DIR = Path(os.getenv('BANKCOMPARISON_BASE_DIR', '.'))
-SCREENSHOTS_DIR = Path(os.getenv('SCREENSHOTS_DIR', BASE_DIR / 'screenshots'))
+API_URL = "https://durchblicker.at/api/0.2/tariff-calculate/immokredit"
 
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
 
-def ensure_dirs() -> None:
-    SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+LAUFZEITEN_TO_SCRAPE = [35, 30, 25, 20, 15]
 
+# The API rate-limits roughly 20 calls per minute (HTTP 429, no Retry-After
+# header), so calls are spaced out and 429s get long backoffs.
+REQUEST_TIMEOUT = 60
+MAX_RETRIES = 5
+RETRY_BACKOFF = [2, 4, 8, 16, 16]
+RATE_LIMIT_BACKOFF = [30, 60, 90, 120, 120]
+DELAY_BETWEEN_CALLS = 4.0
 
-def ts_filename(prefix: str) -> str:
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return f"{prefix}-{timestamp}.png"
-
-
-def log_print(label: str, value: str) -> None:
-    print(f"{label}: {value}".strip())
-
-
-def wait_for_text(page, text: str, timeout_ms: int = 15000):
-    return page.locator(f"text={text}").first.wait_for(state="visible", timeout=timeout_ms)
-
-
-def parse_currency_to_float(value: Optional[str]) -> Optional[float]:
-    """
-    Parse currency string to float
-    Examples: "€ 1.948" -> 1948.00, "1.948,50 €" -> 1948.50
-    """
-    if not value or value == "-":
-        return None
-    
-    # Remove currency symbols and spaces
-    value = value.replace("€", "").replace(" ", "").strip()
-    
-    # German format: 1.234,56 -> 1234.56
-    # Remove thousand separators (.) and replace comma with dot
-    value = value.replace(".", "")
-    value = value.replace(",", ".")
-    
-    try:
-        return float(value)
-    except (ValueError, AttributeError):
-        return None
-
-
-def extract_text(page, text_selector: str) -> str:
-    locator = page.locator(text_selector).first
-    try:
-        locator.wait_for(state="visible", timeout=10000)
-        return locator.inner_text().strip()
-    except PlaywrightTimeoutError:
-        return ""
+# Wizard input as captured from durchblicker.at ("Kauf Wohnung in Wien").
+# projekt.laufzeit / projekt.fixverzinsung(Boolean) are set per variation.
+BASE_INPUT: Dict[str, Any] = {
+    "input": {
+        "immokredit": {
+            "projekt": {
+                "vorhaben": "kauf",
+                "suchphaseKauf": "recherche",
+                "suchphaseUmbau": "none",
+                "suchphaseUmschuldung": "none",
+                "immobilie": "wohnung",
+                "gefunden": True,
+                "suchphaseBau": "none",
+                "eigentumsform": "eigentum",
+                "pacht": 0,
+                "pfandrechthoehe": 0,
+                "grundstueck": 0,
+                "wertimmobilie": 0,
+                "wertdachboden": 0,
+                "grundstueckgefunden": True,
+                "inBau": "fertig",
+                "lage": "wien",
+                "nutzung": "eigen",
+                "angebot": False,
+                "foerderungbesteht": False,
+                "foerderungneu": False,
+                "laufzeit": "35",
+                "fixverzinsungBoolean": False,
+                "fixverzinsung": 0,
+            },
+            "projektkosten": {
+                "kaufpreis": 500000,
+                "kaufnebenkosten": 50000,
+                "kaufnebenkosteninfo": False,
+                "kaufpreisgrundstueck": 0,
+                "kaufpreisdachboden": 0,
+                "kaufnebenkostengrundstueck": 0,
+                "kaufnebenkostendachboden": 0,
+                "baukosten": 0,
+                "genossenschaftsanteil": 0,
+                "umbauprojektkosten": 0,
+                "adaptierungskosten": 0,
+                "sonstige": 0,
+                "gesamt": 550000,
+                "foerderung": 0,
+                "foerderungzurueck": True,
+                "eigenmittel": 150000,
+                "eigenmittelinfo": False,
+                "finanzierung": 400000,
+                "finanzierunggesamt": 400000,
+                "genossenschaftinfo": False,
+                "bankbestehend": "none",
+                "kredithoehe": 0,
+                "zusatzbetragaktiv": False,
+                "zusatzbetrag": 0,
+                "restlaufzeit": "25",
+                "ratebestehend": 0,
+            },
+            "haushalt": {
+                "sicherheiten": "none",
+                "sicherheitwert": 0,
+                "alter": 45,
+                "beziehung": "none",
+                "alterpartner": 0,
+                "kinder": 0,
+                "privatkonkurs": False,
+                "berufsituation": "erwerb",
+                "selbststaendigkeitdauer": True,
+                "freiberufler": False,
+                "einkommen": 8500,
+                "einkommeninfo": False,
+                "berufsituationpartner": "none",
+                "selbststaendigkeitdauerpartner": True,
+                "freiberuflerpartner": False,
+                "einkommenpartner": 0,
+                "einkommenpartnerinfo": False,
+                "einkommengemeinsam": 8500,
+                "beschaeftigungsdauer": True,
+                "mieteinnahmen": 0,
+                "buerge": False,
+                "buergeinfo": False,
+                "einkommenbuerge": 0,
+                "nutzflaeche": 100,
+                "mietausgaben": 0,
+                "wohnkosten": 0,
+                "rueckzahlungfoerderung": 0,
+                "ratebestehend": 300,
+                "alimente": 0,
+                "sonderausgaben": 300,
+                "anzahlkfz": 0,
+                "zweiteperson": False,
+            },
+        },
+        "section": {},
+        "mydb": {"hasForeignDO": False},
+        "submitted": {"input-projekt": True, "input-haushalt": True},
+        "verified": {"input-projekt": True, "input-haushalt": True},
+        "captcha": "",
+        "berechnet": True,
+    },
+    "userid": "",
+    "src": "calc",
+    "captcha": "",
+    "hostname": "durchblicker.at",
+    "isMobile": False,
+    "gclid": None,
+}
 
 
 def get_fixierung_values_for_laufzeit(laufzeit_jahre: int) -> List[int]:
-    """
-    Determine the Fixierung slider values to test based on Laufzeit.
-    Rule: Fixierung cannot exceed Laufzeit.
-    Returns list of years: 0, 5, 10, 15, etc., up to Laufzeit.
-    """
+    """Fixierung values to calculate: 0 (variabel), 5, 10, ... up to Laufzeit."""
     fixierung_values = []
     current = 0
     while current <= laufzeit_jahre:
         fixierung_values.append(current)
-        if current == 0:
-            current = 5
-        else:
-            current += 5
+        current = 5 if current == 0 else current + 5
     return fixierung_values
 
 
-def screen1(page, laufzeit_jahre: int = 35) -> None:
-    """
-    Screen 1: Set initial parameters
-    Note: We set to MAXIMUM Laufzeit (35) here, then adjust on Screen 4
-    """
-    page.goto("https://durchblicker.at/kreditrechner", wait_until="load")
-
-    # Accept cookies if banner appears
-    try:
-        # Try common consent button texts
-        for attempt in [
-            lambda: page.get_by_role("button", name=re.compile(r"alle akzeptieren|akzeptieren|accept all", re.I)).first.click(timeout=2500),
-            lambda: page.locator("text=Alle akzeptieren").first.click(timeout=2500),
-            lambda: page.locator("text=Akzeptieren").first.click(timeout=2500),
-            lambda: page.get_by_role("button", name=re.compile(r"zustimmen|einverstanden", re.I)).first.click(timeout=2500),
-        ]:
-            try:
-                attempt()
-                break
-            except Exception:
-                continue
-    except Exception:
-        pass
-
-    # Set Kreditbetrag to 500000 (clear first)
-    # Try common patterns: labeled input or aria
-    def clear_and_type(locator, value: str):
-        locator.click()
-        page.keyboard.press("Control+A")
-        page.keyboard.press("Delete")
-        locator.type(value, delay=20)
-
-    filled_amount = False
-    for label in [
-        "Kreditbetrag",
-        "Kreditbetrag in Euro",
-        "Kreditbetrag €",
-    ]:
-        try:
-            amount_el = page.get_by_label(label, exact=False)
-            if amount_el.count() > 0:
-                clear_and_type(amount_el.nth(0), "500000")
-                filled_amount = True
-                break
-        except Exception:
-            continue
-    if not filled_amount:
-        # Fallback: numeric input near text Kreditbetrag
-        try:
-            kb_section = page.locator("text=Kreditbetrag").first
-            input_box = kb_section.locator("xpath=ancestor::section|ancestor::div").locator("input[type='number'], input").first
-            clear_and_type(input_box, "500000")
-        except Exception:
-            pass
-
-    # Set Laufzeit to maximum (35 Jahre) - will be adjusted on Screen 4
-    try:
-        laufzeit_input = page.locator("#laufzeit").first
-        laufzeit_input.wait_for(state="visible", timeout=8000)
-        laufzeit_input.click()
-        page.keyboard.press("Control+A")
-        page.keyboard.press("Delete")
-        laufzeit_input.type(str(laufzeit_jahre), delay=50)
-        laufzeit_input.blur()
-        print(f"[INFO] Laufzeit set to {laufzeit_jahre} via #laufzeit input (max value)", flush=True)
-    except Exception as e:
-        print(f"[WARN] Could not set Laufzeit via #laufzeit: {e}", flush=True)
-        # Fallback
-        try:
-            lt_section = page.locator("text=Laufzeit").first
-            input_box = lt_section.locator("xpath=ancestor::section|ancestor::div").locator("input").first
-            input_box.click()
-            page.keyboard.press("Control+A")
-            page.keyboard.press("Delete")
-            input_box.type(str(laufzeit_jahre))
-        except Exception:
-            pass
-
-    # Give UI a moment to recompute
-    time.sleep(1.0)
-
-    # Capture values
-    # 1) Repräsentatives Berechnungsbeispiel (longer text)
-    rep_text = ""
-    for key in [
-        "Repräsentatives Berechnungsbeispiel",
-        "Repräsentatives Berechnungs Beispiel",
-    ]:
-        rep_text = extract_text(page, f"text={key}")
-        if rep_text:
-            # Expand to capture container text if possible
-            try:
-                container = page.locator(f"text={key}").first.locator("xpath=ancestor::*[self::section or self::div][1]")
-                rep_text = container.inner_text().strip()
-            except Exception:
-                pass
-            break
-
-    # 2) Monatliche Rate
-    monatliche_rate = ""
-    try:
-        rate_label = page.locator("text=Monatliche Rate").first
-        rate_container = rate_label.locator("xpath=ancestor::*[self::section or self::div][1]")
-        monatliche_rate = rate_container.inner_text().strip()
-    except Exception:
-        # Fallback: look for euro amount near label
-        try:
-            monatliche_rate = page.locator("text=€").first.inner_text().strip()
-        except Exception:
-            pass
-
-    # 3) zB. Fixzins für 25 Jahre
-    fixzins_25 = ""
-    for key in [
-        "Fixzins für 25 Jahre",
-        "Fixzins 25",
-        "zb. Fixzins für 25 Jahre",
-        "zB. Fixzins für 25 Jahre",
-    ]:
-        fixzins_25 = extract_text(page, f"text={key}")
-        if fixzins_25:
-            try:
-                container = page.locator(f"text={key}").first.locator("xpath=ancestor::*[self::section or self::div][1]")
-                fixzins_25 = container.inner_text().strip()
-            except Exception:
-                pass
-            break
-
-    log_print("Repräsentatives Berechnungsbeispiel", rep_text)
-    log_print("Monatliche Rate", monatliche_rate)
-    log_print("Fixzins (25 Jahre)", fixzins_25)
-
-    # Screenshot disabled
-    # page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen1")), full_page=True)
-
-    # Click "Jetzt berechnen"
-    for name in [
-        "Jetzt berechnen",
-        "Berechnen",
-    ]:
-        try:
-            page.get_by_role("button", name=name).first.click(timeout=5000)
-            break
-        except Exception:
-            continue
-
-
-def _verify_selection(page, container, value_text: str) -> bool:
-    # Check radio/tiles via aria-checked
-    try:
-        radio_checked = container.locator("[role='radio'][aria-checked='true']").filter(has_text=value_text)
-        if radio_checked.count() > 0:
-            return True
-    except Exception:
-        pass
-    # Check native select selected option text
-    try:
-        select_el = container.locator("select").first
-        if select_el.count() > 0:
-            try:
-                option_text = select_el.locator("option:checked").inner_text().strip()
-                return value_text.lower() in option_text.lower()
-            except Exception:
-                pass
-    except Exception:
-        pass
-    # Check combobox selected flag
-    try:
-        selected_option = container.locator("[aria-selected='true']").filter(has_text=value_text)
-        if selected_option.count() > 0:
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def set_select_like(page, label_text: str, value_text: str) -> bool:
-    print(f"[INFO] Set select '{label_text}' -> '{value_text}' (start)", flush=True)
-    # Try accessible select first
-    try:
-        select_el = page.get_by_label(label_text, exact=False)
-        if select_el.count() > 0:
-            try:
-                select_el.select_option(label=value_text, timeout=6000)
-                print(f"[INFO] Set select '{label_text}' done (accessible)", flush=True)
-                return True
-            except Exception:
-                pass
-    except Exception:
-        pass
-    # Fallback: click dropdown/tiles by label then option by text
-    try:
-        label_node = page.locator(f"text={label_text}").first
-        label_node.scroll_into_view_if_needed(timeout=4000)
-        container = label_node.locator("xpath=ancestor::*[self::label or self::section or self::div or self::fieldset][1]")
-        # Try tiles/radios/buttons
-        tile = container.locator("[role='radio'][aria-label='" + value_text + "'], [role='radio']:has-text('" + value_text + "'), button:has-text('" + value_text + "'), [role='button']:has-text('" + value_text + "')").first
-        if tile.count() > 0:
-            tile.scroll_into_view_if_needed(timeout=4000)
-            tile.click(timeout=6000)
-            if _verify_selection(page, container, value_text):
-                print(f"[INFO] Set select '{label_text}' done (tile/radio)", flush=True)
-                return True
-        # Native select
-        native_select = container.locator("select").first
-        if native_select.count() > 0:
-            try:
-                native_select.select_option(label=value_text, timeout=6000)
-                if _verify_selection(page, container, value_text):
-                    print(f"[INFO] Set select '{label_text}' done (native)", flush=True)
-                    return True
-            except Exception:
-                pass
-        # Combobox/button-like triggers
-        trigger = container.locator("select, [role='combobox'], button, [role='button'], .select__control, .dropdown-toggle").first
-        trigger.scroll_into_view_if_needed(timeout=4000)
-        trigger.click(timeout=6000)
-        try:
-            page.get_by_role("option", name=value_text).first.click(timeout=4000)
-        except Exception:
-            page.locator(f"text={value_text}").first.click(timeout=4000)
-        if _verify_selection(page, container, value_text):
-            print(f"[INFO] Set select '{label_text}' done (fallback)", flush=True)
-            return True
-    except Exception:
-        # Last resort: click option by text directly
-        try:
-            page.locator(f"text={value_text}").first.click(timeout=6000)
-            try:
-                label_node = page.locator(f"text={label_text}").first
-                container = label_node.locator("xpath=ancestor::*[self::label or self::section or self::div or self::fieldset][1]")
-                if _verify_selection(page, container, value_text):
-                    print(f"[INFO] Set select '{label_text}' done (direct)", flush=True)
-                    return True
-            except Exception:
-                pass
-        except Exception:
-            print(f"[WARN] Set select '{label_text}' failed", flush=True)
-    return False
-
-
-def fill_number_near_label(page, label_text: str, value: str) -> None:
-    print(f"[INFO] Fill number '{label_text}' -> '{value}' (start)", flush=True)
-    # Accessible label
-    try:
-        page.get_by_label(label_text, exact=False).fill(value, timeout=6000)
-        print(f"[INFO] Fill number '{label_text}' done (accessible)", flush=True)
-        return
-    except Exception:
-        pass
-    # Fallback near label
-    try:
-        label_node = page.locator(f"text={label_text}").first
-        container = label_node.locator("xpath=ancestor::*[self::label or self::section or self::div][1]")
-        input_box = container.locator("input[type='number'], input").first
-        input_box.fill(value, timeout=6000)
-        print(f"[INFO] Fill number '{label_text}' done (fallback)", flush=True)
-    except Exception:
-        print(f"[WARN] Fill number '{label_text}' failed", flush=True)
-
-
-def screen2(page) -> None:
-    # Wait for screen 2 elements
-    try:
-        wait_for_text(page, "Finanzierungsvorhaben", timeout_ms=20000)
-    except PlaywrightTimeoutError:
-        pass
-
-    # Give UI time to render and verify markers
-    time.sleep(3)
-    try:
-        page.locator("text=Finanzierungsvorhaben").first.wait_for(state="visible", timeout=6000)
-        page.locator("text=Art der Immobilie").first.wait_for(state="visible", timeout=6000)
-    except Exception:
-        print("[WARN] Screen 2 markers not visible; debug screenshot disabled", flush=True)
-        # page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen2-debug")), full_page=True)
-
-    print("[INFO] Screen 2 interactions start", flush=True)
-    # First try direct known select element for Finanzierungsvorhaben
-    success_fv = False
-    try:
-        sel = page.locator("#select_immokredit_projekt_vorhaben").first
-        if sel.count() > 0:
-            sel.select_option(value="kauf", timeout=6000)
-            try:
-                checked_text = sel.locator("option:checked").inner_text().strip()
-                if "kauf" in sel.input_value().lower() or "kauf" in checked_text.lower():
-                    print("[INFO] Finanzierungsvorhaben set via direct select (id)", flush=True)
-                    success_fv = True
-            except Exception:
-                pass
-    except Exception:
-        pass
-    if not success_fv:
-        success_fv = set_select_like(page, "Finanzierungsvorhaben", "Kauf")
-    if not success_fv:
-        print("[ERROR] Finanzierungsvorhaben could not be set. Aborting further steps on Screen 2.", flush=True)
-        # page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen2-fv-failed")), full_page=True)
-        return
-    # Direct selects via IDs from provided page source
-    try:
-        page.locator("#select_immokredit_projekt_suchphaseKauf").first.select_option(value="recherche", timeout=6000)
-        print("[INFO] Suchphase set (id)", flush=True)
-    except Exception:
-        set_select_like(page, "Suchphase", "Recherche")
-    try:
-        page.locator("#select_immokredit_projekt_immobilie").first.select_option(value="wohnung", timeout=6000)
-        print("[INFO] Art der Immobilie set (id)", flush=True)
-    except Exception:
-        set_select_like(page, "Art der Immobilie", "Eigentumswohnung")
-    try:
-        page.locator("#select_immokredit_projekt_inBau").first.select_option(value="fertig", timeout=6000)
-        print("[INFO] Immobilie in Bau set (id)", flush=True)
-    except Exception:
-        set_select_like(page, "Immobilie in Bau", "bestehende Immobilie")
-    try:
-        page.locator("#select_immokredit_projekt_lage").first.select_option(value="wien", timeout=6000)
-        print("[INFO] Lage der Immobilie set (id)", flush=True)
-    except Exception:
-        set_select_like(page, "Lage der Immobilie", "Wien")
-    try:
-        page.locator("#select_immokredit_projekt_nutzung").first.select_option(value="eigen", timeout=6000)
-        print("[INFO] Nutzung set (id)", flush=True)
-    except Exception:
-        set_select_like(page, "Nutzung", "Eigennutzung")
-
-    # Direct inputs via IDs
-    def clear_type_and_blur(selector: str, value: str) -> None:
-        el = page.locator(selector).first
-        el.wait_for(state="visible", timeout=8000)
-        el.click()
-        page.keyboard.press("Control+A")
-        page.keyboard.press("Delete")
-        el.type(value, delay=20)
-        el.blur()
-
-    try:
-        clear_type_and_blur("#input_immokredit_projektkosten_kaufpreis", "500000")
-        print("[INFO] Kaufpreis set (id)", flush=True)
-    except Exception:
-        fill_number_near_label(page, "Kaufpreis", "500000")
-    try:
-        clear_type_and_blur("#input_immokredit_projektkosten_kaufnebenkosten", "50000")
-        print("[INFO] Kaufnebenkosten set (id)", flush=True)
-    except Exception:
-        fill_number_near_label(page, "Kaufnebenkosten", "50000")
-    try:
-        clear_type_and_blur("#input_immokredit_projektkosten_eigenmittel", "150000")
-        print("[INFO] Eigenmittel set (id)", flush=True)
-    except Exception:
-        fill_number_near_label(page, "Eigenmittel", "150000")
-    print("[INFO] Screen 2 interactions done", flush=True)
-
-    time.sleep(0.5)
-    # Screenshot disabled
-    # page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen2")), full_page=True)
-
-    for name in ["Weiter", "Nächster Schritt", "Fortfahren"]:
-        try:
-            page.get_by_role("button", name=name).first.click(timeout=6000)
-            break
-        except Exception:
-            continue
-
-
-def screen3(page) -> None:
-    try:
-        wait_for_text(page, "Ihr Alter", timeout_ms=20000)
-    except PlaywrightTimeoutError:
-        pass
-
-    def first_visible_locator(selectors: list[str]):
-        for sel in selectors:
-            loc = page.locator(sel).first
-            try:
-                if loc.count() > 0:
-                    loc.wait_for(state="visible", timeout=2000)
-                    return loc
-            except Exception:
-                continue
-        return None
-
-    def clear_type_and_blur(selector: str, value: str) -> bool:
-        try:
-            el = page.locator(selector).first
-            if el.count() == 0:
-                return False
-            el.wait_for(state="visible", timeout=6000)
-            el.click()
-            page.keyboard.press("Control+A")
-            page.keyboard.press("Delete")
-            el.type(value, delay=20)
-            el.blur()
-            return True
-        except Exception:
-            return False
-
-    print("[INFO] Screen 3 ID-based fill start", flush=True)
-    # Ihr Alter
-    if not clear_type_and_blur("input[id*='haushalt'][id*='alter'], #input_immokredit_haushalt_alter", "45"):
-        fill_number_near_label(page, "Ihr Alter", "45")
-
-    # Finanzierung mit zweiter Person -> Nein
-    try:
-        container = first_visible_locator([
-            "div.row[data-storage*='haushalt'][data-storage*='zweite']",
-            "div.row:has-text('Finanzierung mit zweiter Person')",
-        ])
-        if container:
-            radio_no = container.locator("input[type='radio'][value='false'], label:has-text('Nein')").first
-            radio_no.click()
-        else:
-            page.get_by_role("radio", name=lambda n: n and "nein" in n.lower()).first.check()
-    except Exception:
-        try:
-            page.get_by_role("button", name=lambda n: n and "nein" in n.lower()).first.click()
-        except Exception:
-            pass
-
-    # Anzahl unterhaltspflichtiger Kinder -> Keine
-    sel_kinder = first_visible_locator([
-        "select[id*='haushalt'][id*='kinder']",
-        "#select_immokredit_haushalt_kinder",
-    ])
-    if sel_kinder:
-        try:
-            sel_kinder.select_option(label="Keine", timeout=6000)
-        except Exception:
-            try:
-                sel_kinder.select_option(value="keine", timeout=6000)
-            except Exception:
-                set_select_like(page, "Anzahl unterhaltspflichtiger Kinder", "Keine")
+def build_input(laufzeit_jahre: int, fixierung_jahre: int) -> Dict[str, Any]:
+    payload = copy.deepcopy(BASE_INPUT)
+    projekt = payload["input"]["immokredit"]["projekt"]
+    projekt["laufzeit"] = str(laufzeit_jahre)
+    if fixierung_jahre > 0:
+        projekt["fixverzinsungBoolean"] = True
+        projekt["fixverzinsung"] = fixierung_jahre
     else:
-        set_select_like(page, "Anzahl unterhaltspflichtiger Kinder", "Keine")
+        projekt["fixverzinsungBoolean"] = False
+        projekt["fixverzinsung"] = 0
+    return payload
 
-    # Ihre berufliche Situation -> Angestellt / Arbeitend via known id
-    try:
-        page.locator("#select_immokredit_haushalt_berufsituation").first.select_option(value="erwerb", timeout=6000)
-        print("[INFO] Berufssituation set (id)", flush=True)
-    except Exception:
-        sel_beruf = first_visible_locator([
-            "select[id*='haushalt'][id*='beruf']",
-            "select[id*='berufliche']",
-        ])
-        if sel_beruf:
-            try:
-                sel_beruf.select_option(label="Angestellt", timeout=6000)
-            except Exception:
-                try:
-                    sel_beruf.select_option(value="angestellt", timeout=6000)
-                except Exception:
-                    set_select_like(page, "Ihre berufliche Situation", "Angestellt")
-        else:
-            set_select_like(page, "Ihre berufliche Situation", "Angestellt")
 
-    # Ihr Netto-Einkommen -> 8500 (via known id, requires special handling due to blur event)
-    print("[INFO] Setting Netto-Einkommen...", flush=True)
-    try:
-        einkommen_input = page.locator("#input_immokredit_haushalt_einkommen").first
-        einkommen_input.wait_for(state="visible", timeout=8000)
-        einkommen_input.click()
-        time.sleep(0.3)  # Small delay after click
-        page.keyboard.press("Control+A")
-        page.keyboard.press("Delete")
-        time.sleep(0.2)
-        einkommen_input.type("8500", delay=50)
-        time.sleep(0.3)
-        einkommen_input.blur()  # Trigger the blur event that sets the value
-        time.sleep(0.5)  # Wait for JS to process
-        print("[INFO] Netto-Einkommen set via direct input", flush=True)
-    except Exception as e:
-        print(f"[WARN] Could not set Netto-Einkommen: {e}", flush=True)
+def de_number(value: float, decimals: int = 3) -> str:
+    """Format a number with German decimal comma (no thousand separators)."""
+    return f"{value:.{decimals}f}".replace(".", ",")
+
+
+def fetch_offer(
+    session: requests.Session, laufzeit_jahre: int, fixierung_jahre: int
+) -> Optional[Dict[str, Any]]:
+    """Call the tariff-calculate API for one Laufzeit/Fixierung combination."""
+    payload = build_input(laufzeit_jahre, fixierung_jahre)
+    last_error: Optional[str] = None
+
+    for attempt in range(MAX_RETRIES):
+        rate_limited = False
         try:
-            fill_number_near_label(page, "Ihr Netto-Einkommen", "8500")
-        except Exception:
-            pass
-
-    # Wohnnutzfläche -> 100 via known id
-    if not clear_type_and_blur("#input_immokredit_haushalt_nutzflaeche", "100"):
-        if not clear_type_and_blur("input[id*='wohn'][id*='flae'], input[id*='wohn'][id*='nutz']", "100"):
-            fill_number_near_label(page, "Wohnnutzfläche", "100")
-
-    # Kredit-/Leasingraten -> 300
-    if not clear_type_and_blur("input[id*='leasing'], input[id*='kredit'][id*='rate']", "300"):
-        fill_number_near_label(page, "Kredit-/Leasingraten", "300")
-
-    # Anzahl der KFZ -> Keine
-    sel_kfz = first_visible_locator([
-        "select[id*='kfz']",
-        "#select_immokredit_haushalt_kfz",
-    ])
-    if sel_kfz:
-        try:
-            sel_kfz.select_option(label="keine", timeout=6000)
-        except Exception:
-            try:
-                sel_kfz.select_option(value="none", timeout=6000)
-            except Exception:
-                set_select_like(page, "Anzahl der KFZ", "Keine")
-    else:
-        set_select_like(page, "Anzahl der KFZ", "Keine")
-
-    print("[INFO] Screen 3 ID-based fill done", flush=True)
-
-    time.sleep(0.5)
-    # Screenshot disabled
-    # page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen3")), full_page=True)
-
-    print("[INFO] Attempting to click Berechnen button...", flush=True)
-    for name in ["Berechnen", "Jetzt berechnen", "Angebote berechnen"]:
-        try:
-            page.get_by_role("button", name=name).first.click(timeout=5000)
-            print(f"[INFO] Clicked '{name}' button", flush=True)
-            break
-        except Exception as e:
-            print(f"[WARN] Failed to click '{name}': {e}", flush=True)
-            continue
-    
-    # Wait a moment and check for validation errors
-    time.sleep(2)
-    try:
-        error_elements = page.locator(".alert-danger, .error, [class*='error'], [class*='danger']")
-        if error_elements.count() > 0:
-            for i in range(error_elements.count()):
-                error_text = error_elements.nth(i).inner_text()
-                if error_text.strip():
-                    print(f"[WARN] Validation error found: {error_text.strip()}", flush=True)
-    except Exception as e:
-        print(f"[DEBUG] Error checking for validation messages: {e}", flush=True)
-
-
-def screen4(page, laufzeiten_to_scrape: List[int] = None) -> Dict[int, List[Dict[str, Any]]]:
-    """
-    Screen 4: Results page with TWO sliders (Laufzeit and Fixierung)
-    This function stays on Screen 4 and toggles BOTH sliders to capture all combinations.
-    
-    Args:
-        page: Playwright page object
-        laufzeiten_to_scrape: List of Laufzeiten to scrape (default: [35, 30, 25, 20, 15])
-    
-    Returns:
-        Dict mapping laufzeit -> list of variations
-    """
-    if laufzeiten_to_scrape is None:
-        laufzeiten_to_scrape = [35, 30, 25, 20, 15]
-    
-    # Wait for results to load (look for typical result elements)
-    try:
-        page.wait_for_load_state("networkidle", timeout=30000)
-    except PlaywrightTimeoutError:
-        pass
-
-    # Heuristic wait for offers/summary
-    for key in [
-        "Kreditangebote",
-        "Ergebnisse",
-        "Angebote",
-    ]:
-        try:
-            wait_for_text(page, key, timeout_ms=8000)
-            break
-        except PlaywrightTimeoutError:
-            continue
-
-    def scrape_offer_details() -> dict:
-        """Scrape financial data specifically from the Finanzierungsdetails div element"""
-        details = {}
-        try:
-            # Wait for page to settle after slider change (important for dynamic content)
-            try:
-                page.wait_for_load_state("networkidle", timeout=5000)
-            except Exception:
-                pass
-            time.sleep(2)  # Additional wait for dynamic content to render
-            
-            # Try multiple selector strategies (fallback chain)
-            selectors = [
-                ('data-sentry-component', '[data-sentry-component="Finanzierungsdetails"]'),
-                ('text-based', 'div:has-text("Finanzierungsdetails")'),
-                ('section-heading', 'section:has(h2:has-text("Finanzierungsdetails"))'),
-                ('section-heading-alt', 'section:has(h3:has-text("Finanzierungsdetails"))'),
-                ('div-heading', 'div:has(h2:has-text("Finanzierungsdetails"))'),
-                ('content-based', 'div:has-text("Zinssatz"):has-text("Effektiver Zinssatz")'),
-            ]
-            
-            finanzierung_div = None
-            used_selector = None
-            
-            for selector_name, selector in selectors:
-                try:
-                    locator = page.locator(selector).first
-                    if locator.count() > 0:
-                        locator.wait_for(state="visible", timeout=5000)
-                        finanzierung_div = locator
-                        used_selector = selector_name
-                        print(f"[DEBUG] Found Finanzierungsdetails using: {selector_name} ({selector})", flush=True)
-                        break
-                except Exception as e:
-                    continue
-            
-            if not finanzierung_div or finanzierung_div.count() == 0:
-                print("[WARN] Finanzierungsdetails div not found with any selector", flush=True)
-                
-                # Debug: Check if text is present on page
-                try:
-                    body_text = page.locator("body").inner_text()
-                    if "Finanzierungsdetails" in body_text:
-                        print("[DEBUG] 'Finanzierungsdetails' text IS present on page, but element structure may have changed", flush=True)
-                    if "Zinssatz" in body_text:
-                        print("[DEBUG] 'Zinssatz' text IS present on page", flush=True)
-                    if "Effektiver Zinssatz" in body_text:
-                        print("[DEBUG] 'Effektiver Zinssatz' text IS present on page", flush=True)
-                except Exception:
-                    pass
-                
-                return details
-            
-            # Try multiple strategies to find grid rows
-            grid_row_selectors = [
-                'div.grid.grid-cols-subgrid',
-                'div.grid',
-                'div[class*="grid"]',
-                'div.row',
-                'tr',  # In case it's a table
-            ]
-            
-            grid_rows = None
-            for grid_selector in grid_row_selectors:
-                try:
-                    rows = finanzierung_div.locator(grid_selector)
-                    if rows.count() > 0:
-                        grid_rows = rows
-                        print(f"[DEBUG] Found grid rows using: {grid_selector}", flush=True)
-                        break
-                except Exception:
-                    continue
-            
-            if grid_rows and grid_rows.count() > 0:
-                print(f"[DEBUG] Found {grid_rows.count()} financial data rows", flush=True)
-                
-                # Extract data from each row
-                for i in range(grid_rows.count()):
-                    row = grid_rows.nth(i)
-                    
-                    # Try multiple strategies to find label and value
-                    label_value_pairs = [
-                        # Original strategy: first div and third div with span
-                        (row.locator('div').first, row.locator('div.text-bluegrey span').first),
-                        # Alternative: first and second div
-                        (row.locator('div').first, row.locator('div').nth(1)),
-                        # Table-based: td elements
-                        (row.locator('td').first, row.locator('td').nth(1)),
-                        # Any div with text and any span
-                        (row.locator('div').first, row.locator('span').first),
-                    ]
-                    
-                    for label_loc, value_loc in label_value_pairs:
-                        try:
-                            if label_loc.count() > 0 and value_loc.count() > 0:
-                                label = label_loc.inner_text().strip()
-                                value = value_loc.inner_text().strip()
-                    
-                                if label and value and value != label:
-                                    # Clean up the label to match our expected keys
-                                    clean_label = label.replace('Anschlusskondition nach Fixzinsphase', 'Anschlusskondition')
-                                    details[clean_label] = value
-                                    print(f"[DEBUG] Extracted {clean_label}: {value}", flush=True)
-                                    break  # Found this row, move to next
-                        except Exception:
-                            continue
-            
-            # Fallback: If no structured data found, try text-based extraction
-            if not details:
-                print("[WARN] No data extracted from structured grid, trying text-based fallback...", flush=True)
-                try:
-                    full_text = finanzierung_div.inner_text()
-                    print(f"[DEBUG] Finanzierungsdetails full text (first 500 chars): {full_text[:500]}...", flush=True)
-                    
-                    # Try to extract key-value pairs from text
-                    # Look for patterns like "Label: Value" or "Label\nValue"
-                    lines = full_text.split('\n')
-                    for i, line in enumerate(lines):
-                        line = line.strip()
-                        if ':' in line:
-                            parts = line.split(':', 1)
-                            if len(parts) == 2:
-                                key = parts[0].strip()
-                                val = parts[1].strip()
-                                if key and val:
-                                    details[key] = val
-                except Exception as e:
-                    print(f"[DEBUG] Text-based extraction also failed: {e}", flush=True)
-                
-        except Exception as e:
-            print(f"[WARN] Error scraping Finanzierungsdetails: {e}", flush=True)
-        
-        return details
-    
-    def set_laufzeit_slider(value: int) -> None:
-        """Set the Laufzeit slider on Screen 4 to a specific value"""
-        try:
-            slider = page.locator("#laufzeitslider").first
-            slider.wait_for(state="visible", timeout=8000)
-            slider.fill(str(value))
-            # Trigger change event
-            slider.dispatch_event("change")
-            slider.dispatch_event("input")
-            # Wait for UI to update
-            time.sleep(2)
-            print(f"[INFO] Laufzeit slider set to {value} years", flush=True)
-        except Exception as e:
-            print(f"[WARN] Error setting Laufzeit slider to {value}: {e}", flush=True)
-    
-    def set_fixierung_slider(value: int) -> None:
-        """Set the Fixierung slider to a specific value (fixed interest period in years)"""
-        try:
-            slider = page.locator("#fixverzinsungslider").first
-            slider.wait_for(state="visible", timeout=8000)
-            slider.fill(str(value))
-            # Trigger change event
-            slider.dispatch_event("change")
-            slider.dispatch_event("input")
-            # Wait for UI to update
-            time.sleep(2)
-            print(f"[INFO] Fixierung slider set to {value} years", flush=True)
-        except Exception as e:
-            print(f"[WARN] Error setting Fixierung slider to {value}: {e}", flush=True)
-    
-    # Dictionary to store all variations organized by Laufzeit
-    all_data_by_laufzeit = {}
-    
-    # Loop through each Laufzeit (descending order: 35, 30, 25, 20, 15...)
-    for laufzeit in laufzeiten_to_scrape:
-        print("\n" + "="*70)
-        print(f"[INFO] Processing Laufzeit: {laufzeit} Jahre (on Screen 4)")
-        print("="*70)
-        
-        # Set the Laufzeit slider on Screen 4
-        set_laufzeit_slider(laufzeit)
-        
-        # Determine appropriate Fixierung values for this Laufzeit
-        fixierung_values = get_fixierung_values_for_laufzeit(laufzeit)
-        print(f"[INFO] Fixierung values for {laufzeit} Jahre: {fixierung_values}", flush=True)
-        
-        variations_data = []
-        
-        # Loop through each Fixierung value
-        for fixierung in fixierung_values:
-            print(f"\n[INFO] Setting Fixierung to {fixierung} years (Laufzeit: {laufzeit})...", flush=True)
-            set_fixierung_slider(fixierung)
-            
-            # Wait a moment for the UI to update
-            time.sleep(1)
-            
-            # Scrape details
-            print(f"[INFO] Capturing data at {laufzeit}J Laufzeit / {fixierung}J Fixierung...", flush=True)
-            details = scrape_offer_details()
-            
-            if details and any(v != '-' for v in details.values()):
-                print(f"[INFO] Data captured successfully:", flush=True)
-                for key, val in details.items():
-                    if val != '-':
-                        print(f"  {key}: {val}", flush=True)
+            response = session.post(API_URL, json=payload, timeout=REQUEST_TIMEOUT)
+            if response.status_code == 429:
+                rate_limited = True
+                last_error = "HTTP 429 (rate limited)"
+            elif response.status_code != 200:
+                last_error = f"HTTP {response.status_code}"
             else:
-                print(f"[WARN] No data captured or all fields empty", flush=True)
-            
-            # Convert to structured format
-            variation_data = {
-                'fixierung_jahre': fixierung,
-                'rate': parse_currency_to_float(details.get('Rate')),
-                'zinssatz': details.get('Zinssatz', '-'),
-                'laufzeit': details.get('Laufzeit', '-'),
-                'anschlusskondition': details.get('Anschlusskondition'),
-                'effektiver_zinssatz': details.get('Effektiver Zinssatz', '-'),
-                'auszahlungsbetrag': parse_currency_to_float(details.get('Auszahlungsbetrag')),
-                'einberechnete_kosten': parse_currency_to_float(details.get('Einberechnete Kosten')),
-                'kreditbetrag': parse_currency_to_float(details.get('Kreditbetrag')),
-                'gesamtbetrag': parse_currency_to_float(details.get('Zu zahlender Gesamtbetrag')),
-                'besicherung': details.get('Besicherung', '-')
-            }
-            variations_data.append(variation_data)
-            
-            # Screenshot disabled
-            # screenshot_name = f"screen4_laufzeit_{laufzeit}j_fixierung_{fixierung}j"
-            # page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename(screenshot_name)), full_page=True)
-            # print(f"[INFO] Screenshot: {screenshot_name}", flush=True)
-        
-        # Store variations for this Laufzeit
-        all_data_by_laufzeit[laufzeit] = variations_data
-        print(f"\n[INFO] ✓ Laufzeit {laufzeit} Jahre complete: {len(variations_data)} variations captured")
-    
-    # Screenshot disabled
-    # page.screenshot(path=str(SCREENSHOTS_DIR / ts_filename("screen4_final")), full_page=True)
-    
-    return all_data_by_laufzeit
+                body = response.json()
+                if body.get("success") and body.get("result"):
+                    return body["result"][0]
+                last_error = (
+                    f"success={body.get('success')} message={body.get('message')}"
+                )
+        except (requests.RequestException, ValueError) as exc:
+            last_error = str(exc)
+
+        if attempt < MAX_RETRIES - 1:
+            backoff = RATE_LIMIT_BACKOFF if rate_limited else RETRY_BACKOFF
+            wait = backoff[min(attempt, len(backoff) - 1)]
+            print(
+                f"[WARN] API call failed ({last_error}), retrying in {wait}s...",
+                flush=True,
+            )
+            time.sleep(wait)
+
+    print(
+        f"[ERROR] API call failed for Laufzeit {laufzeit_jahre}/Fixierung "
+        f"{fixierung_jahre}: {last_error}",
+        flush=True,
+    )
+    return None
 
 
-def run(playwright: Playwright) -> int:
-    ensure_dirs()
-    browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])  # headless runner friendly
-    context = browser.new_context(locale="de-DE")
-    page = context.new_page()
-    # Make failures surface faster
-    page.set_default_timeout(15000)
-    
-    # Define Laufzeiten to scrape (descending order for Screen 4 slider)
-    # Current range: 35, 30, 25, 20, 15 (can expand to include 10, 5)
-    laufzeiten_to_scrape = [35, 30, 25, 20, 15]
-    
-    # Start with MAXIMUM Laufzeit for Screen 1
-    max_laufzeit = max(laufzeiten_to_scrape)
-    
-    # Base metadata (same for all runs)
-    base_metadata = {
-        'kreditbetrag': 500000.00,
-        'kaufpreis': 500000.00,
-        'kaufnebenkosten': 50000.00,
-        'eigenmittel': 150000.00,
-        'haushalt_alter': 45,
-        'haushalt_einkommen': 8500.00,
-        'haushalt_nutzflaeche': 100,
-        'haushalt_kreditraten': 300.00,
+def offer_to_variation(
+    offer: Optional[Dict[str, Any]], laufzeit_jahre: int, fixierung_jahre: int
+) -> Dict[str, Any]:
+    """Map an API result to the fixierung_variations row format.
+
+    Text fields mimic the strings the old UI scraper captured
+    (e.g. "3,290 % p.a. variabel", "4,080 % p.a. fix (25 Jahre)") so the
+    housing_loan_chart_ready view keeps parsing them correctly.
+    """
+    if not offer:
+        return {
+            "fixierung_jahre": fixierung_jahre,
+            "rate": None,
+            "zinssatz": "-",
+            "laufzeit": f"{laufzeit_jahre} Jahre",
+            "anschlusskondition": None,
+            "effektiver_zinssatz": "-",
+            "auszahlungsbetrag": None,
+            "einberechnete_kosten": None,
+            "kreditbetrag": None,
+            "gesamtbetrag": None,
+            "besicherung": "-",
+        }
+
+    zins = offer.get("zins")
+    eff_zins = offer.get("effektivZins")
+    anschluss = offer.get("anschlusskondition")
+
+    if fixierung_jahre > 0:
+        zinssatz_text = (
+            f"{de_number(zins)} % p.a. fix ({fixierung_jahre} Jahre)"
+            if zins is not None
+            else "-"
+        )
+        anschluss_text = (
+            f"{de_number(anschluss)} % p.a. variabel" if anschluss is not None else None
+        )
+    else:
+        zinssatz_text = (
+            f"{de_number(zins)} % p.a. variabel" if zins is not None else "-"
+        )
+        anschluss_text = None
+
+    return {
+        "fixierung_jahre": fixierung_jahre,
+        "rate": offer.get("rate"),
+        "zinssatz": zinssatz_text,
+        "laufzeit": f"{offer.get('laufzeit', laufzeit_jahre)} Jahre",
+        "anschlusskondition": anschluss_text,
+        "effektiver_zinssatz": (
+            f"{de_number(eff_zins)} % p.a." if eff_zins is not None else "-"
+        ),
+        "auszahlungsbetrag": offer.get("auszahlungsbetrag"),
+        "einberechnete_kosten": offer.get("eingerechneteKosten"),
+        "kreditbetrag": offer.get("kreditbetrag"),
+        "gesamtbetrag": offer.get("gesamtbelastung"),
+        "besicherung": offer.get("besicherung", "-"),
     }
-    
-    try:
-        print("\n" + "="*80)
-        print(f"[INFO] Multi-Laufzeit Scraping Session Started")
-        print(f"[INFO] Will scrape Laufzeiten: {laufzeiten_to_scrape}")
-        print("="*80 + "\n")
-        
-        # Navigate through Screens 1-3 ONCE with maximum Laufzeit
-        print(f"[INFO] Screen 1 start (Initial Laufzeit: {max_laufzeit} Jahre)", flush=True)
-        screen1(page, laufzeit_jahre=max_laufzeit)
-        print("[INFO] Screen 1 done", flush=True)
-        
-        print("[INFO] Screen 2 start", flush=True)
-        screen2(page)
-        print("[INFO] Screen 2 done", flush=True)
-        
-        print("[INFO] Screen 3 start", flush=True)
-        screen3(page)
-        print("[INFO] Screen 3 done", flush=True)
-        
-        # Screen 4: Toggle both sliders to capture ALL Laufzeit/Fixierung combinations
-        print("[INFO] Screen 4 start (will process all Laufzeiten here)", flush=True)
-        all_data_by_laufzeit = screen4(page, laufzeiten_to_scrape=laufzeiten_to_scrape)
-        print("[INFO] Screen 4 done - All Laufzeiten processed", flush=True)
-        
-        # Save each Laufzeit as a separate database run
-        print("\n" + "="*80)
-        print("[INFO] Saving data to database...")
-        print("="*80)
-        
-        successful_runs = 0
-        total_variations = 0
-        
-        for laufzeit, variations_data in all_data_by_laufzeit.items():
-            run_metadata = base_metadata.copy()
-            run_metadata['scrape_date'] = datetime.now()
-            run_metadata['laufzeit_jahre'] = laufzeit
-            run_metadata['notes'] = f'Multi-Laufzeit scraping (Screen 4 sliders) - {laufzeit} Jahre'
-            
-            scraping_data = {
-                'run_metadata': run_metadata,
-                'fixierung_variations': variations_data
-            }
-            
-            try:
-                run_id = save_scraping_data(scraping_data)
-                print(f"[INFO] ✅ Run ID {run_id}: {laufzeit} Jahre, {len(variations_data)} variations", flush=True)
-                successful_runs += 1
-                total_variations += len(variations_data)
-            except Exception as e:
-                print(f"[ERROR] Failed to save Laufzeit {laufzeit}: {e}", flush=True)
-        
-        print("\n" + "="*80)
-        print(f"[INFO] 🎉 Multi-Laufzeit Scraping Complete!")
-        print("="*80)
-        print(f"[INFO] Successful runs: {successful_runs}/{len(laufzeiten_to_scrape)}")
-        print(f"[INFO] Total variations captured: {total_variations}")
-        print(f"[INFO] Laufzeiten scraped: {list(all_data_by_laufzeit.keys())}")
-        print("="*80 + "\n")
-        
-        return 0
-    finally:
-        context.close()
-        browser.close()
 
 
 def main() -> int:
-    try:
-        with sync_playwright() as playwright:
-            return run(playwright)
-    except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 1
+    session = requests.Session()
+    session.headers.update(
+        {
+            "User-Agent": USER_AGENT,
+            "Content-Type": "application/json",
+            "Origin": "https://durchblicker.at",
+            "Referer": "https://durchblicker.at/immokredit/vergleich/ergebnis",
+        }
+    )
+
+    base_metadata = {
+        "kreditbetrag": 500000.00,
+        "kaufpreis": 500000.00,
+        "kaufnebenkosten": 50000.00,
+        "eigenmittel": 150000.00,
+        "haushalt_alter": 45,
+        "haushalt_einkommen": 8500.00,
+        "haushalt_nutzflaeche": 100,
+        "haushalt_kreditraten": 300.00,
+    }
+
+    print("\n" + "=" * 80)
+    print("[INFO] Durchblicker Immokredit Scraper (tariff-calculate API)")
+    print(f"[INFO] Laufzeiten: {LAUFZEITEN_TO_SCRAPE}")
+    print("=" * 80 + "\n")
+
+    successful_runs = 0
+    total_variations = 0
+    failed_calls = 0
+    has_valid_data = False
+
+    for laufzeit in LAUFZEITEN_TO_SCRAPE:
+        fixierung_values = get_fixierung_values_for_laufzeit(laufzeit)
+        print(f"\n[INFO] Laufzeit {laufzeit} Jahre, Fixierungen: {fixierung_values}")
+
+        variations_data = []
+        for fixierung in fixierung_values:
+            offer = fetch_offer(session, laufzeit, fixierung)
+            variation = offer_to_variation(offer, laufzeit, fixierung)
+            variations_data.append(variation)
+
+            if offer:
+                has_valid_data = True
+                print(
+                    f"[INFO]   Fixierung {fixierung:>2}J: Rate {variation['rate']}, "
+                    f"Zinssatz {variation['zinssatz']}, "
+                    f"Effektiv {variation['effektiver_zinssatz']}",
+                    flush=True,
+                )
+            else:
+                failed_calls += 1
+
+            time.sleep(DELAY_BETWEEN_CALLS)
+
+        run_metadata = dict(base_metadata)
+        run_metadata["scrape_date"] = datetime.now()
+        run_metadata["laufzeit_jahre"] = laufzeit
+        run_metadata["notes"] = f"API scraper (tariff-calculate) - {laufzeit} Jahre"
+
+        try:
+            run_id = save_scraping_data(
+                {
+                    "run_metadata": run_metadata,
+                    "fixierung_variations": variations_data,
+                }
+            )
+            print(
+                f"[INFO] Run ID {run_id}: {laufzeit} Jahre, "
+                f"{len(variations_data)} variations saved"
+            )
+            successful_runs += 1
+            total_variations += len(variations_data)
+        except Exception as exc:
+            print(f"[ERROR] Failed to save Laufzeit {laufzeit}: {exc}", flush=True)
+
+    print("\n" + "=" * 80)
+    if has_valid_data:
+        print("[INFO] Scraping complete with valid data")
+    else:
+        print("[ERROR] Scraping complete but NO valid data extracted")
+    print(f"[INFO] Successful runs: {successful_runs}/{len(LAUFZEITEN_TO_SCRAPE)}")
+    print(
+        f"[INFO] Total variations: {total_variations} "
+        f"(failed API calls: {failed_calls})"
+    )
+    print("=" * 80 + "\n")
+
+    return 0 if has_valid_data else 1
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
