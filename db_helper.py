@@ -66,11 +66,28 @@ def create_database(db_path: Path = DB_PATH) -> None:
             kreditbetrag DECIMAL(12,2),
             gesamtbetrag DECIMAL(12,2),
             besicherung VARCHAR(100),
+            bank_id INTEGER,
+            euribor DECIMAL(6,3),
+            euribor_typ INTEGER,
             scrape_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (run_id) REFERENCES scraping_runs(id)
         )
     """)
-    
+
+    # Migrate older databases that predate the bank/euribor columns
+    cursor.execute("PRAGMA table_info(fixierung_variations)")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+    for column, col_type in [
+        ("bank_id", "INTEGER"),
+        ("euribor", "DECIMAL(6,3)"),
+        ("euribor_typ", "INTEGER"),
+    ]:
+        if column not in existing_columns:
+            cursor.execute(
+                f"ALTER TABLE fixierung_variations ADD COLUMN {column} {col_type}"
+            )
+            print(f"[INFO] Migrated fixierung_variations: added column {column}")
+
     # Create indexes for faster queries
     cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_run_date 
@@ -171,8 +188,11 @@ def insert_fixierung_variation(
             kreditbetrag,
             gesamtbetrag,
             besicherung,
+            bank_id,
+            euribor,
+            euribor_typ,
             scrape_timestamp
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         run_id,
         variation_data.get('fixierung_jahre'),
@@ -186,6 +206,9 @@ def insert_fixierung_variation(
         variation_data.get('kreditbetrag'),
         variation_data.get('gesamtbetrag'),
         variation_data.get('besicherung'),
+        variation_data.get('bank_id'),
+        variation_data.get('euribor'),
+        variation_data.get('euribor_typ'),
         datetime.now()
     ))
     

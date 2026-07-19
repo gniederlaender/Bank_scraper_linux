@@ -261,6 +261,9 @@ def offer_to_variation(
             "kreditbetrag": None,
             "gesamtbetrag": None,
             "besicherung": "-",
+            "bank_id": None,
+            "euribor": None,
+            "euribor_typ": None,
         }
 
     zins = offer.get("zins")
@@ -296,6 +299,12 @@ def offer_to_variation(
         "kreditbetrag": offer.get("kreditbetrag"),
         "gesamtbetrag": offer.get("gesamtbelastung"),
         "besicherung": offer.get("besicherung", "-"),
+        # Anonymous Durchblicker-internal ID of the bank behind the best
+        # offer (no public name mapping) plus the Euribor reference rate
+        # the variable pricing is based on (euribor_typ = months, e.g. 3).
+        "bank_id": offer.get("bank"),
+        "euribor": offer.get("euribor"),
+        "euribor_typ": offer.get("euriborTyp"),
     }
 
 
@@ -346,7 +355,9 @@ def main() -> int:
                 print(
                     f"[INFO]   Fixierung {fixierung:>2}J: Rate {variation['rate']}, "
                     f"Zinssatz {variation['zinssatz']}, "
-                    f"Effektiv {variation['effektiver_zinssatz']}",
+                    f"Effektiv {variation['effektiver_zinssatz']}, "
+                    f"Bank #{variation['bank_id']}, "
+                    f"Euribor {variation['euribor']} ({variation['euribor_typ']}M)",
                     flush=True,
                 )
             else:
