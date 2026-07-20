@@ -428,11 +428,14 @@ def get_all_loan_offers(db_path: Path = DB_PATH) -> List[Dict[str, Any]]:
         }
     """
     import re
-    
+
+    # Databases without submitted offers may not have the table yet
+    ensure_loan_offers_table(db_path)
+
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    
+
     # Query all loan offers
     cursor.execute("""
         SELECT anbieter, angebotsdatum, fixzinssatz, effektivzinssatz, laufzeit, fileName, fixzinssatz_in_jahren

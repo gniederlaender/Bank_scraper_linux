@@ -213,6 +213,8 @@ def main() -> None:
             max_tokens=args.max_tokens,
         )
     except Exception as exc:  # pragma: no cover - CLI feedback
+        import traceback
+        traceback.print_exc()
         raise SystemExit(f"Fehler: {exc}")
 
 
