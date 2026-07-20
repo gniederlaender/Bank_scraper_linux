@@ -133,20 +133,26 @@ fi
 echo ""
 # Step 5b: Generate housing loan HTML with AI LLM commentary
 echo "Step 5b: Generating LLM housing loan commentary (beta)..."
+# Remove any stale commented file from a previous run first, so a failed
+# commentary step can never cause an outdated report to be emailed.
+rm -f bank_comparison_housing_loan_durchblicker_email_commented.html
 python3 llm_housing_commentary.py --input bank_comparison_housing_loan_durchblicker_email.html --output bank_comparison_housing_loan_durchblicker_email_commented.html
 LLM_COMMENT_EXIT=$?
 
 if [ $LLM_COMMENT_EXIT -ne 0 ]; then
     echo "⚠️  Failed to generate LLM housing loan commentary (exit code: $LLM_COMMENT_EXIT)"
+    echo "   Falling back to email report WITHOUT commentary (fresh data)"
+    HOUSING_EMAIL_FILE=bank_comparison_housing_loan_durchblicker_email.html
 else
     echo "✅ LLM housing loan commentary generated!"
+    HOUSING_EMAIL_FILE=bank_comparison_housing_loan_durchblicker_email_commented.html
 fi
 
 echo ""
 
 # Step 6: Send housing loan email report
-echo "Step 6: Sending housing loan email report..."
-python3 send_email_report.py bank_comparison_housing_loan_durchblicker_email_commented.html --type wohnkredit
+echo "Step 6: Sending housing loan email report ($HOUSING_EMAIL_FILE)..."
+python3 send_email_report.py "$HOUSING_EMAIL_FILE" --type wohnkredit
 EMAIL_EXIT=$?
 
 if [ $EMAIL_EXIT -ne 0 ]; then
@@ -223,20 +229,26 @@ fi
 echo ""
 # Step 4b: Generate LLM commentary for consumer loan HTML email
 echo "Step 4b: Generating LLM commentary for consumer loan HTML email..."
+# Remove any stale commented file from a previous run first, so a failed
+# commentary step can never cause an outdated report to be emailed.
+rm -f bank_comparison_consumer_loan_email_commented.html
 python3 llm_consumer_commentary.py --input bank_comparison_consumer_loan_email.html --output bank_comparison_consumer_loan_email_commented.html
 CONSUMER_LLM_COMMENTARY_EXIT=$?
 
 if [ $CONSUMER_LLM_COMMENTARY_EXIT -ne 0 ]; then
     echo "⚠️  Failed to generate LLM commentary for consumer loan email (exit code: $CONSUMER_LLM_COMMENTARY_EXIT)"
+    echo "   Falling back to email report WITHOUT commentary (fresh data)"
+    CONSUMER_EMAIL_FILE=bank_comparison_consumer_loan_email.html
 else
     echo "✅ LLM commentary for consumer loan email generated!"
+    CONSUMER_EMAIL_FILE=bank_comparison_consumer_loan_email_commented.html
 fi
 
 echo ""
 
 # Step 5: Send consumer loan email report
-echo "Step 5: Sending consumer loan email report..."
-python3 send_email_report.py bank_comparison_consumer_loan_email_commented.html --type konsumkredit
+echo "Step 5: Sending consumer loan email report ($CONSUMER_EMAIL_FILE)..."
+python3 send_email_report.py "$CONSUMER_EMAIL_FILE" --type konsumkredit
 CONSUMER_EMAIL_EXIT=$?
 
 if [ $CONSUMER_EMAIL_EXIT -ne 0 ]; then
