@@ -94,7 +94,48 @@ SCREENSHOTS_DIR=/opt/Bankcomparison/screenshots
 
 # Web Server Deployment (optional)
 WEB_ROOT=/var/www/xxx
+
+# Loan Offer API (optional, only needed for the "Konkurrenzangebot erfassen"
+# form on the housing loan web report - see "Loan Offer Form" below)
+OFFER_API_PORT=5001
+OFFER_API_ALLOWED_ORIGIN=https://smartprototypes.net
 ```
+
+## Loan Offer Form (Konkurrenzangebote erfassen)
+
+The housing loan web report includes a form to manually log competitor loan
+offers. It submits to `offer_api.py`, a small Flask API that writes into the
+`loan_offers` table.
+
+That API binds to `127.0.0.1` only and has no authentication, so it is never
+directly reachable from the internet. It must sit behind a reverse proxy on
+the same domain that serves the report, which the form calls via a relative
+URL (`/bankapi/offers` by default, configurable via `OFFER_API_URL` before
+running `generate_housing_loan_html.py`). A hardcoded
+`http://localhost:5001` (the previous behaviour) can never work for a page
+served from a real domain, since "localhost" then refers to the *visitor's*
+machine, not the server.
+
+Setup on the server (`/opt/Bankcomparison`):
+
+1. Run the API as a systemd service so it survives reboots and restarts on
+   failure. A template is at `deploy/offer-api.service` — copy it, adjust
+   paths/user if needed, then:
+   ```bash
+   sudo cp deploy/offer-api.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now offer-api
+   ```
+2. Add a reverse proxy route in the Apache vhost that serves the report
+   (needs `a2enmod proxy proxy_http`). Template at
+   `deploy/apache-bankapi.conf.snippet`:
+   ```bash
+   sudo a2enmod proxy proxy_http
+   # paste the snippet's ProxyPass/ProxyPassReverse lines into the vhost
+   sudo apachectl configtest && sudo systemctl reload apache2
+   ```
+3. Regenerate the report so it embeds the correct form URL:
+   `python3 generate_housing_loan_html.py`.
 
 ## Usage
 
