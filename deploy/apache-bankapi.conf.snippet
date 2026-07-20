@@ -1,0 +1,9 @@
+# Add inside the <VirtualHost *:443> block for smartprototypes.net
+# (the vhost that already serves /Bank_market_overview/). Requires:
+#   a2enmod proxy proxy_http
+
+ProxyPreserveHost On
+
+# /bankapi/offers -> http://127.0.0.1:5001/api/offers (loopback-only Flask app)
+ProxyPass        /bankapi/ http://127.0.0.1:5001/api/
+ProxyPassReverse /bankapi/ http://127.0.0.1:5001/api/

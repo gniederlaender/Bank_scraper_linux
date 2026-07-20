@@ -36,6 +36,13 @@ CHART_PNG_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_CHART_PNG_PATH', 'housing_lo
 INDIVIDUAL_OFFERS_CHART_PNG_PATH = BASE_DIR / os.getenv('INDIVIDUAL_OFFERS_CHART_PNG_PATH', 'individual_offers_chart.png')
 SCREENSHOTS_DIR = BASE_DIR / 'screenshots'
 
+# URL the "Angebot erfassen" form on the web report submits to. Defaults to a
+# same-origin relative path so it works wherever the report is hosted, via an
+# Apache/nginx reverse proxy in front of offer_api.py (see README). A
+# hardcoded http://localhost:5001 only ever works when the *viewer's own
+# machine* runs the API, which is never true for a page served from a domain.
+OFFER_API_URL = os.getenv('OFFER_API_URL', '/bankapi/offers')
+
 
 def get_bank_color(anbieter: str) -> str:
     """
@@ -2186,7 +2193,7 @@ def generate_html():
                 const data = Object.fromEntries(formData.entries());
 
                 try {{
-                    const response = await fetch('http://localhost:5001/api/offers', {{
+                    const response = await fetch('{OFFER_API_URL}', {{
                         method: 'POST',
                         headers: {{'Content-Type': 'application/json'}},
                         body: JSON.stringify(data)
@@ -2206,7 +2213,7 @@ def generate_html():
                     }}
                 }} catch (error) {{
                     statusSpan.style.color = '#dc3545';
-                    statusSpan.textContent = '❌ Server nicht erreichbar. Bitte starten Sie den API-Server (python3 offer_api.py)';
+                    statusSpan.textContent = '❌ Server nicht erreichbar. Bitte prüfen, ob der Offer-API-Dienst läuft.';
                 }}
 
                 submitBtn.disabled = false;

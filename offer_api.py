@@ -22,9 +22,19 @@ except ImportError:
 BASE_DIR = Path(os.getenv('BANKCOMPARISON_BASE_DIR', '/opt/Bankcomparison'))
 DB_PATH = BASE_DIR / os.getenv('HOUSING_LOAN_DB_PATH', 'austrian_banks_housing_loan.db')
 API_PORT = int(os.getenv('OFFER_API_PORT', 5001))
+# Bind to loopback only: this API has no auth, so it must never be reachable
+# directly from the internet. It's meant to sit behind an Apache/nginx
+# reverse proxy (e.g. https://yourdomain/bankapi/ -> 127.0.0.1:5001), which
+# is also the only setup where the web report's relative fetch('/bankapi/...')
+# call resolves to it. Override only for local development.
+API_HOST = os.getenv('OFFER_API_HOST', '127.0.0.1')
+# Origin allowed to call this API via CORS (the domain the report is served
+# from). Same-origin requests through the reverse proxy don't need CORS at
+# all; this only matters if the report HTML is hosted on a different origin.
+ALLOWED_ORIGIN = os.getenv('OFFER_API_ALLOWED_ORIGIN')
 
 app = Flask(__name__)
-CORS(app)  # Allow cross-origin requests for local development
+CORS(app, origins=[ALLOWED_ORIGIN] if ALLOWED_ORIGIN else [])
 
 
 def ensure_loan_offers_table():
@@ -213,11 +223,14 @@ def health_check():
 
 
 if __name__ == '__main__':
-    print(f"[INFO] Starting Offer API Server on port {API_PORT}")
+    print(f"[INFO] Starting Offer API Server on {API_HOST}:{API_PORT}")
     print(f"[INFO] Database: {DB_PATH}")
+    if not ALLOWED_ORIGIN:
+        print("[WARN] OFFER_API_ALLOWED_ORIGIN not set - cross-origin requests are blocked. "
+              "Same-origin requests via the reverse proxy still work.")
 
     # Ensure table exists
     ensure_loan_offers_table()
 
-    # Run the server
-    app.run(host='0.0.0.0', port=API_PORT, debug=False)
+    # Run the server (loopback-only; expose it via a reverse proxy, see README)
+    app.run(host=API_HOST, port=API_PORT, debug=False)

@@ -1,0 +1,15 @@
+[Unit]
+Description=Bank Scraper - Loan Offer API (offer_api.py)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/Bankcomparison
+EnvironmentFile=/opt/Bankcomparison/.env
+ExecStart=/opt/Bankcomparison/venv/bin/python3 /opt/Bankcomparison/offer_api.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
