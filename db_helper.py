@@ -98,10 +98,30 @@ def create_database(db_path: Path = DB_PATH) -> None:
         CREATE INDEX IF NOT EXISTS idx_fixierung_run 
         ON fixierung_variations(run_id)
     """)
-    
+
+    # Create oenb_series_data table: numeric series extracted from the OeNB
+    # Wohnimmobilien-Dashboard charts (screenshots alone can't be read for exact
+    # values). One row per (chart, series, period) per scrape.
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS oenb_series_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chart_id TEXT NOT NULL,
+            series_name TEXT NOT NULL,
+            period_label TEXT NOT NULL,
+            period_order INTEGER NOT NULL,
+            value REAL,
+            scrape_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_oenb_series_chart_scrape
+        ON oenb_series_data(chart_id, scrape_date)
+    """)
+
     conn.commit()
     conn.close()
-    
+
     print(f"[INFO] Database created/verified at: {db_path}")
 
 
@@ -1181,10 +1201,113 @@ def export_consumer_loan_data_json(db_path: Path = CONSUMER_DB_PATH) -> str:
         'time_series_data': data,
         'per_bank_changes': per_bank_changes
     }
-    
+
     conn.close()
-    
+
     return json.dumps(result, indent=2, ensure_ascii=False)
+
+
+def save_oenb_series_data(
+    chart_id: str,
+    series: List[Dict[str, Any]],
+    scrape_date: Optional[datetime] = None,
+    db_path: Path = DB_PATH
+) -> int:
+    """
+    Persist the numeric series extracted from one OeNB dashboard chart.
+
+    Args:
+        chart_id: e.g. 'demand_verah_durchschn_kreditsumme_chart'
+        series: list of {'name': str, 'points': [(period_label, value), ...]}
+            points must already be in chronological order (oldest first) -
+            period_order is derived from that order.
+        scrape_date: timestamp for this batch (defaults to now)
+        db_path: path to database file
+
+    Returns:
+        Number of rows inserted.
+    """
+    scrape_date = scrape_date or datetime.now()
+
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+
+    inserted = 0
+    for s in series:
+        series_name = s.get('name')
+        points = s.get('points') or []
+        for period_order, (period_label, value) in enumerate(points):
+            cursor.execute("""
+                INSERT INTO oenb_series_data (
+                    chart_id, series_name, period_label, period_order, value, scrape_date
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """, (chart_id, series_name, period_label, period_order, value, scrape_date))
+            inserted += 1
+
+    conn.commit()
+    conn.close()
+
+    print(f"[INFO] Saved {inserted} OeNB data points for chart '{chart_id}'")
+    return inserted
+
+
+def get_latest_oenb_table_data(chart_id: str, limit: int = 5, db_path: Path = DB_PATH) -> Dict[str, Any]:
+    """
+    Get the last `limit` periods of the most recently scraped numeric series
+    for one OeNB chart, pivoted for table rendering.
+
+    Returns:
+        {
+            'series_names': ['Ø Kreditsumme (Tsd. €)', ...],
+            'rows': [{'period': 'Q1 2026', 'values': {'Ø Kreditsumme (Tsd. €)': 287.0, ...}}, ...]
+        }
+        or an empty dict if no data is available (fresh DB, or extraction
+        hasn't run yet) - callers must fall back to chart-only rendering.
+    """
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='oenb_series_data'
+        """)
+        if not cursor.fetchone():
+            return {}
+
+        cursor.execute("""
+            SELECT MAX(scrape_date) as latest FROM oenb_series_data WHERE chart_id = ?
+        """, (chart_id,))
+        row = cursor.fetchone()
+        latest_scrape = row['latest'] if row else None
+        if not latest_scrape:
+            return {}
+
+        cursor.execute("""
+            SELECT series_name, period_label, period_order, value
+            FROM oenb_series_data
+            WHERE chart_id = ? AND scrape_date = ?
+            ORDER BY period_order
+        """, (chart_id, latest_scrape))
+        data_rows = cursor.fetchall()
+        if not data_rows:
+            return {}
+
+        series_names = []
+        periods = {}  # period_order -> {'period': label, 'values': {series: value}}
+        for r in data_rows:
+            if r['series_name'] not in series_names:
+                series_names.append(r['series_name'])
+            entry = periods.setdefault(r['period_order'], {'period': r['period_label'], 'values': {}})
+            entry['values'][r['series_name']] = r['value']
+
+        ordered = [periods[k] for k in sorted(periods.keys())]
+        last_rows = ordered[-limit:]
+
+        return {'series_names': series_names, 'rows': last_rows}
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

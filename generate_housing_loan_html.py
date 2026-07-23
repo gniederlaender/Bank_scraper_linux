@@ -17,7 +17,7 @@ matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-from db_helper import get_all_loan_offers
+from db_helper import get_all_loan_offers, get_latest_oenb_table_data
 import glob
 
 # Try to load dotenv if available
@@ -42,6 +42,15 @@ SCREENSHOTS_DIR = BASE_DIR / 'screenshots'
 # hardcoded http://localhost:5001 only ever works when the *viewer's own
 # machine* runs the API, which is never true for a page served from a domain.
 OFFER_API_URL = os.getenv('OFFER_API_URL', '/bankapi/offers')
+
+# Shared design tokens for Plotly charts, kept in sync with the CSS custom
+# properties in generate_html()'s <style> block so charts and page chrome match.
+PLOTLY_FONT = '-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
+COLOR_TEXT = '#1b2733'
+COLOR_TEXT_MUTED = '#5b6b78'
+COLOR_GRID = '#e2e8ee'
+COLOR_ACCENT = '#0a8a9a'
+COLOR_PRIMARY = '#0f3b52'
 
 
 def get_bank_color(anbieter: str) -> str:
@@ -206,44 +215,41 @@ def generate_interactive_chart():
         else:
             trace_metadata.append({'laufzeit': None, 'type': None, 'fixierung': None})
     
-    # Update layout (no updatemenus - we'll use custom HTML controls)
+    # Update layout (no updatemenus - we'll use custom HTML controls; the chart
+    # title lives in the surrounding HTML card header, not inside the plot)
     fig.update_layout(
-        title={
-            'text': '🏠 Wohnkredite - Durchblicker-Bestpreis',
-            'x': 0.5,
-            'xanchor': 'center',
-            'font': {'size': 20, 'family': 'Segoe UI, Arial'}
-        },
         xaxis=dict(
-            title=dict(text='Datum', font=dict(size=14, family='Segoe UI, Arial')),
+            title=dict(text='Datum', font=dict(size=13, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
+            tickfont=dict(color=COLOR_TEXT_MUTED, size=11),
             showgrid=True,
             gridwidth=1,
-            gridcolor='rgba(200,200,200,0.3)',
+            gridcolor=COLOR_GRID,
             tickformat='%d.%m.%Y'
         ),
         yaxis=dict(
-            title=dict(text='Zinssatz (%)', font=dict(size=14, family='Segoe UI, Arial')),
+            title=dict(text='Zinssatz (%)', font=dict(size=13, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
+            tickfont=dict(color=COLOR_TEXT_MUTED, size=11),
             showgrid=True,
             gridwidth=1,
-            gridcolor='rgba(200,200,200,0.3)'
+            gridcolor=COLOR_GRID
         ),
         hovermode='closest',
-        plot_bgcolor='rgba(250,250,250,0.9)',
-        paper_bgcolor='white',
-        font=dict(family='Segoe UI, Arial', size=12),
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(family=PLOTLY_FONT, size=12, color=COLOR_TEXT),
         legend=dict(
             orientation="v",
             yanchor="top",
             y=1,
             xanchor="left",
             x=1.02,
-            bgcolor="rgba(255,255,255,0.8)",
-            bordercolor="rgba(0,0,0,0.2)",
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor=COLOR_GRID,
             borderwidth=1,
             font=dict(size=10)
         ),
         height=600,
-        margin=dict(l=80, r=280, t=80, b=80)
+        margin=dict(l=70, r=260, t=20, b=60)
     )
     
     # Convert to HTML
@@ -403,46 +409,42 @@ def generate_individual_offers_chart():
         else:
             trace_metadata.append({'laufzeit': None, 'type': None, 'fixierung': None, 'anbieter': None})
     
-    # Update layout
+    # Update layout (title lives in the surrounding HTML card header)
     fig.update_layout(
-        title={
-            'text': '💳 Wohnkredite - Konkurrenzangebote',
-            'x': 0.5,
-            'xanchor': 'center',
-            'font': {'size': 20, 'family': 'Segoe UI, Arial'}
-        },
         xaxis=dict(
-            title=dict(text='Datum', font=dict(size=14, family='Segoe UI, Arial')),
+            title=dict(text='Datum', font=dict(size=13, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
+            tickfont=dict(color=COLOR_TEXT_MUTED, size=11),
             showgrid=True,
             gridwidth=1,
-            gridcolor='rgba(200,200,200,0.3)',
+            gridcolor=COLOR_GRID,
             tickformat='%d.%m.%Y'
         ),
         yaxis=dict(
-            title=dict(text='Zinssatz (%)', font=dict(size=14, family='Segoe UI, Arial')),
+            title=dict(text='Zinssatz (%)', font=dict(size=13, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
+            tickfont=dict(color=COLOR_TEXT_MUTED, size=11),
             showgrid=True,
             gridwidth=1,
-            gridcolor='rgba(200,200,200,0.3)'
+            gridcolor=COLOR_GRID
         ),
         hovermode='closest',
-        plot_bgcolor='rgba(250,250,250,0.9)',
-        paper_bgcolor='white',
-        font=dict(family='Segoe UI, Arial', size=12),
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(family=PLOTLY_FONT, size=12, color=COLOR_TEXT),
         legend=dict(
             orientation="v",
             yanchor="top",
             y=1,
             xanchor="left",
             x=1.02,
-            bgcolor="rgba(255,255,255,0.8)",
-            bordercolor="rgba(0,0,0,0.2)",
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor=COLOR_GRID,
             borderwidth=1,
             font=dict(size=10)
         ),
         height=600,
-        margin=dict(l=80, r=280, t=80, b=80)
+        margin=dict(l=70, r=260, t=20, b=60)
     )
-    
+
     # Convert to HTML
     chart_html = fig.to_html(
         include_plotlyjs='cdn',
@@ -875,7 +877,10 @@ def generate_swap_rates_chart():
             '25Y': '#9467bd'    # Purple
         }
         
-        # Add traces for each maturity
+        # Add traces for each maturity. Only the first available maturity (5Y
+        # by default) starts visible - the segmented pill selector in the HTML
+        # shows exactly one maturity at a time via Plotly.restyle.
+        maturities_present = []
         for maturity in ['5Y', '10Y', '15Y', '20Y', '25Y']:
             values = swap_data_by_maturity[maturity]
             if any(v is not None for v in values):
@@ -891,49 +896,38 @@ def generate_swap_rates_chart():
                         'Datum: %{x|%d.%m.%Y}<br>'
                         'Zinssatz: %{y:.2f}%<br>'
                         '<extra></extra>'
-                    )
+                    ),
+                    visible=(len(maturities_present) == 0)
                 ))
-        
-        # Update layout
+                maturities_present.append(maturity)
+
+        # Update layout (title lives in the surrounding HTML card header; no
+        # legend needed since only one maturity is shown at a time)
         fig.update_layout(
-            title={
-                'text': 'EUR SWAP Rates',
-                'x': 0.5,
-                'xanchor': 'center',
-                'font': {'size': 20, 'family': 'Segoe UI, Arial'}
-            },
             xaxis=dict(
-                title=dict(text='Datum', font=dict(size=14, family='Segoe UI, Arial')),
+                title=dict(text='Datum', font=dict(size=13, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
+                tickfont=dict(color=COLOR_TEXT_MUTED, size=11),
                 showgrid=True,
                 gridwidth=1,
-                gridcolor='rgba(200,200,200,0.3)',
+                gridcolor=COLOR_GRID,
                 tickformat='%d.%m.%Y'
             ),
             yaxis=dict(
-                title=dict(text='Zinssatz (%)', font=dict(size=14, family='Segoe UI, Arial')),
+                title=dict(text='Zinssatz (%)', font=dict(size=13, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
+                tickfont=dict(color=COLOR_TEXT_MUTED, size=11),
                 showgrid=True,
                 gridwidth=1,
-                gridcolor='rgba(200,200,200,0.3)'
+                gridcolor=COLOR_GRID
             ),
             hovermode='closest',
-            plot_bgcolor='rgba(250,250,250,0.9)',
-            paper_bgcolor='white',
-            font=dict(family='Segoe UI, Arial', size=12),
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=-0.3,
-                xanchor="center",
-                x=0.5,
-                bgcolor="rgba(255,255,255,0.8)",
-                bordercolor="rgba(0,0,0,0.2)",
-                borderwidth=1,
-                font=dict(size=10)
-            ),
-            height=500,
-            margin=dict(l=60, r=40, t=80, b=120)
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(family=PLOTLY_FONT, size=12, color=COLOR_TEXT),
+            showlegend=False,
+            height=420,
+            margin=dict(l=60, r=30, t=20, b=50)
         )
-        
+
         # Convert to HTML
         chart_html = fig.to_html(
             include_plotlyjs='cdn',
@@ -945,7 +939,7 @@ def generate_swap_rates_chart():
                 'responsive': True
             }
         )
-        
+
         # Generate static PNG for email
         print("[INFO] Generating SWAP rates chart PNG for email...")
         try:
@@ -954,15 +948,15 @@ def generate_swap_rates_chart():
         except Exception as e:
             print(f"[WARN] Could not generate SWAP rates PNG: {e}")
             png_base64 = None
-        
-        return chart_html, png_base64
-        
+
+        return chart_html, maturities_present, png_base64
+
     except ImportError as e:
         print(f"[WARN] swap_data_fetcher not available: {e}")
-        return None, None
+        return None, [], None
     except Exception as e:
         print(f"[WARN] Error generating SWAP rates chart: {e}")
-        return None, None
+        return None, [], None
 
 
 def generate_euribor_chart():
@@ -1015,7 +1009,7 @@ def generate_euribor_chart():
             y=euribor_values,
             mode='lines+markers',
             name='Euribor 3M',
-            line=dict(color='#1f77b4', width=2.5),
+            line=dict(color=COLOR_ACCENT, width=2.5),
             marker=dict(size=6, symbol='circle'),
             hovertemplate=(
                 '<b>Euribor 3M</b><br>'
@@ -1024,45 +1018,31 @@ def generate_euribor_chart():
                 '<extra></extra>'
             )
         ))
-        
-        # Update layout
+
+        # Update layout (title lives in the surrounding HTML card header)
         fig.update_layout(
-            title={
-                'text': 'Euribor 3M',
-                'x': 0.5,
-                'xanchor': 'center',
-                'font': {'size': 20, 'family': 'Segoe UI, Arial'}
-            },
             xaxis=dict(
-                title=dict(text='Datum', font=dict(size=14, family='Segoe UI, Arial')),
+                title=dict(text='Datum', font=dict(size=13, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
+                tickfont=dict(color=COLOR_TEXT_MUTED, size=11),
                 showgrid=True,
                 gridwidth=1,
-                gridcolor='rgba(200,200,200,0.3)',
+                gridcolor=COLOR_GRID,
                 tickformat='%d.%m.%Y'
             ),
             yaxis=dict(
-                title=dict(text='Zinssatz (%)', font=dict(size=14, family='Segoe UI, Arial')),
+                title=dict(text='Zinssatz (%)', font=dict(size=13, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
+                tickfont=dict(color=COLOR_TEXT_MUTED, size=11),
                 showgrid=True,
                 gridwidth=1,
-                gridcolor='rgba(200,200,200,0.3)'
+                gridcolor=COLOR_GRID
             ),
             hovermode='closest',
-            plot_bgcolor='rgba(250,250,250,0.9)',
-            paper_bgcolor='white',
-            font=dict(family='Segoe UI, Arial', size=12),
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=-0.3,
-                xanchor="center",
-                x=0.5,
-                bgcolor="rgba(255,255,255,0.8)",
-                bordercolor="rgba(0,0,0,0.2)",
-                borderwidth=1,
-                font=dict(size=10)
-            ),
-            height=500,
-            margin=dict(l=60, r=40, t=80, b=120)
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(family=PLOTLY_FONT, size=12, color=COLOR_TEXT),
+            showlegend=False,
+            height=380,
+            margin=dict(l=60, r=30, t=20, b=50)
         )
         
         # Convert to HTML
@@ -1202,86 +1182,147 @@ def generate_static_png_euribor(rate_data):
     return f"data:image/png;base64,{img_base64}"
 
 
-def generate_swap_euribor_section_html(swap_chart_html, euribor_chart_html, swap_png_base64, euribor_png_base64, for_email=False):
+def generate_swap_euribor_section_html(swap_chart_html, euribor_chart_html, swap_png_base64, euribor_png_base64,
+                                        for_email=False, swap_maturities=None):
     """Generate HTML section for SWAP/Euribor charts
-    
+
     Args:
         swap_chart_html: Plotly HTML for SWAP rates chart (None if unavailable)
         euribor_chart_html: Plotly HTML for Euribor chart (None if unavailable)
         swap_png_base64: Base64 PNG for SWAP rates (for email)
         euribor_png_base64: Base64 PNG for Euribor (for email)
         for_email: if True, use base64 PNG; if False, use Plotly HTML
+        swap_maturities: list of maturity labels (e.g. ['5Y', '10Y', ...]) present
+            as traces in swap_chart_html, in trace order - used to build the
+            segmented pill selector that shows one maturity at a time
     """
     if not swap_chart_html and not euribor_chart_html:
         return ""
-    
+
+    swap_maturities = swap_maturities or []
+
     section_html = '''
-        <div class="swap-euribor-section" style="margin-top: 50px; padding: 25px; background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-            <h2 style="color: #2c3e50; margin-bottom: 25px; font-size: 1.8em; text-align: center;">📈 Marktzinsen (SWAP & Euribor)</h2>
+        <div class="swap-euribor-section" style="margin-top: 40px;">
+            <h2 style="text-align: center; margin-bottom: 20px;">📈 Marktzinsen (SWAP &amp; Euribor)</h2>
 '''
-    
+
     if for_email:
         # Use static PNG images for email
         if swap_png_base64:
             section_html += f'''
-            <div style="margin-bottom: 30px;">
-                <h3 style="color: #1b5e20; margin-bottom: 15px;">EUR SWAP Rates</h3>
-                <img src="{swap_png_base64}" alt="EUR SWAP Rates" style="width: 100%; max-width: 1400px; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />
+            <div class="chart-container">
+                <div class="chart-title">EUR SWAP Rates</div>
+                <img src="{swap_png_base64}" alt="EUR SWAP Rates" style="width: 100%; max-width: 1400px; height: auto; border-radius: 8px;" />
             </div>
 '''
         if euribor_png_base64:
             section_html += f'''
-            <div style="margin-bottom: 30px;">
-                <h3 style="color: #1b5e20; margin-bottom: 15px;">Euribor 3M</h3>
-                <img src="{euribor_png_base64}" alt="Euribor 3M" style="width: 100%; max-width: 1400px; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />
+            <div class="chart-container">
+                <div class="chart-title">Euribor 3M</div>
+                <img src="{euribor_png_base64}" alt="Euribor 3M" style="width: 100%; max-width: 1400px; height: auto; border-radius: 8px;" />
             </div>
 '''
     else:
         # Use interactive Plotly charts for web
         if swap_chart_html:
+            pills = ''.join(
+                f'<button class="swap-maturity-btn{" active" if i == 0 else ""}" '
+                f'onclick="setSwapMaturity(\'{m}\')" data-maturity="{m}">{m}</button>'
+                for i, m in enumerate(swap_maturities)
+            )
             section_html += f'''
-            <div style="margin-bottom: 30px;">
-                <h3 style="color: #1b5e20; margin-bottom: 15px;">EUR SWAP Rates</h3>
+            <div class="chart-container">
+                <div class="chart-title">EUR SWAP Rates</div>
+                <div class="segmented-control" id="swap-maturity-selector">{pills}</div>
                 {swap_chart_html}
+                <script>
+                    const swapMaturities = {json.dumps(swap_maturities)};
+                    function setSwapMaturity(maturity) {{
+                        const idx = swapMaturities.indexOf(maturity);
+                        if (idx === -1) return;
+                        const visible = swapMaturities.map((m, i) => i === idx);
+                        Plotly.restyle('plotly-swap-rates-chart', {{'visible': visible}});
+                        document.querySelectorAll('.swap-maturity-btn').forEach(btn => {{
+                            btn.classList.toggle('active', btn.dataset.maturity === maturity);
+                        }});
+                    }}
+                </script>
             </div>
 '''
         if euribor_chart_html:
             section_html += f'''
-            <div style="margin-bottom: 30px;">
-                <h3 style="color: #1b5e20; margin-bottom: 15px;">Euribor 3M</h3>
+            <div class="chart-container">
+                <div class="chart-title">Euribor 3M</div>
                 {euribor_chart_html}
             </div>
 '''
-    
+
     section_html += '''
         </div>
 '''
     return section_html
 
 
+def generate_oenb_data_table_html(chart_id: str) -> str:
+    """
+    Render a compact table with the last 5 periods of a chart's underlying
+    numeric series (extracted best-effort by oenb_nachfrage_scraper.py).
+    Returns '' if no data is available yet - the screenshot above still
+    renders on its own in that case.
+    """
+    try:
+        table_data = get_latest_oenb_table_data(chart_id, limit=5)
+    except Exception as e:
+        print(f"[WARN] Could not load OeNB table data for '{chart_id}': {e}")
+        return ""
+
+    if not table_data:
+        return ""
+
+    series_names = table_data['series_names']
+    rows = table_data['rows']
+
+    header_cells = ''.join(f'<th>{name}</th>' for name in series_names)
+    body_rows = ''
+    for row in rows:
+        value_cells = ''
+        for name in series_names:
+            value = row['values'].get(name)
+            value_cells += f'<td>{value:,.2f}</td>' if isinstance(value, (int, float)) else '<td>-</td>'
+        body_rows += f"<tr><td class=\"fixierung-cell\">{row['period']}</td>{value_cells}</tr>"
+
+    return f'''
+                <div class="table-container" style="margin-top: 16px;">
+                    <table>
+                        <thead><tr><th>Zeitraum</th>{header_cells}</tr></thead>
+                        <tbody>{body_rows}</tbody>
+                    </table>
+                </div>'''
+
+
 def generate_oenb_section_html(screenshots, for_email=False):
     """Generate HTML section for OeNB charts
-    
+
     Args:
         screenshots: dict mapping chart_id to screenshot path
         for_email: if True, use base64 encoding; if False, use relative paths
     """
     if not screenshots:
         return ""
-    
+
     oenb_html = '''
-        <div class="oenb-section" style="margin-top: 50px; padding: 25px; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
-            <h2 style="color: #2c3e50; margin-bottom: 25px; font-size: 1.8em; text-align: center;">📊 OeNB Wohnimmobilien Dashboard</h2>
+        <div class="oenb-section" style="margin-top: 40px;">
+            <h2 style="text-align: center; margin-bottom: 20px;">📊 OeNB Wohnimmobilien Dashboard</h2>
 '''
-    
+
     chart_names = {
         'demand_verah_durchschn_kreditsumme_chart': 'Durchschnittliche Kreditsumme (Veränderung)',
         'demand_nkv_zins_chart': 'Nettokreditvolumen & Zinssatz'
     }
-    
+
     for chart_id, screenshot_path in screenshots.items():
         chart_name = chart_names.get(chart_id, chart_id)
-        
+
         if for_email:
             # Use base64 encoding for email
             img_src = image_to_base64(screenshot_path)
@@ -1290,14 +1331,16 @@ def generate_oenb_section_html(screenshots, for_email=False):
         else:
             # Use relative path for web version
             img_src = f"screenshots/{screenshot_path.name}"
-        
+
+        data_table_html = generate_oenb_data_table_html(chart_id)
+
         oenb_html += f'''
-            <div style="margin-bottom: 30px;">
-                <h3>{chart_name}</h3>
-                <img src="{img_src}" alt="{chart_name}" style="width: 100%; max-width: 1400px; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />
+            <div class="chart-container">
+                <div class="chart-title">{chart_name}</div>
+                <img src="{img_src}" alt="{chart_name}" style="width: 100%; max-width: 1400px; height: auto; border-radius: 8px;" />{data_table_html}
             </div>
 '''
-    
+
     oenb_html += '''
         </div>
 '''
@@ -1335,17 +1378,17 @@ def generate_html():
     print("[INFO] Generating SWAP/Euribor charts...")
     swap_chart_result = generate_swap_rates_chart()
     euribor_chart_result = generate_euribor_chart()
-    
+
     if swap_chart_result[0]:
-        swap_chart_html, swap_png_base64 = swap_chart_result
+        swap_chart_html, swap_maturities, swap_png_base64 = swap_chart_result
     else:
-        swap_chart_html, swap_png_base64 = None, None
-    
+        swap_chart_html, swap_maturities, swap_png_base64 = None, [], None
+
     if euribor_chart_result[0]:
         euribor_chart_html, euribor_png_base64 = euribor_chart_result
     else:
         euribor_chart_html, euribor_png_base64 = None, None
-    
+
     if not runs:
         print("[WARN] No data found in database")
         return False, None
@@ -1388,119 +1431,219 @@ def generate_html():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bank Comparison - Housing Loan Analysis (Interactive)</title>
     <style>
+        :root {{
+            --color-bg: #f2f5f7;
+            --color-surface: #ffffff;
+            --color-primary: #0f3b52;
+            --color-primary-dark: #0a2b3d;
+            --color-accent: #0a8a9a;
+            --color-accent-light: #e3f4f6;
+            --color-text: #1b2733;
+            --color-text-muted: #5b6b78;
+            --color-border: #e2e8ee;
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --shadow-sm: 0 1px 3px rgba(15, 59, 82, 0.08);
+            --shadow-md: 0 6px 20px rgba(15, 59, 82, 0.09);
+            --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }}
+        * {{
+            box-sizing: border-box;
+        }}
         body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: var(--font-sans);
             margin: 0;
-            padding: 20px;
-            background: linear-gradient(to bottom right, #f9fafb, #ffffff, #f3f4f6);
+            padding: clamp(10px, 3vw, 24px);
+            background: var(--color-bg);
+            color: var(--color-text);
             min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
         }}
         .container {{
-            max-width: 1600px;
+            max-width: 1440px;
             margin: 0 auto;
-            background-color: white;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            background-color: var(--color-surface);
+            padding: clamp(16px, 3vw, 36px);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-md);
         }}
         h1 {{
-            color: #2c3e50;
+            color: var(--color-primary);
             text-align: center;
-            margin-bottom: 10px;
-            font-size: 2.2em;
+            margin: 4px 0 6px;
+            font-size: clamp(1.3em, 4vw, 2.1em);
+            font-weight: 700;
+            letter-spacing: -0.01em;
+        }}
+        h2 {{
+            color: var(--color-primary);
+            font-weight: 700;
+            font-size: clamp(1.1em, 3vw, 1.6em);
         }}
         .subtitle {{
             text-align: center;
-            color: #7f8c8d;
-            margin-bottom: 30px;
-            font-size: 1.1em;
+            color: var(--color-text-muted);
+            margin-bottom: clamp(16px, 3vw, 28px);
+            font-size: clamp(0.85em, 2vw, 1.05em);
         }}
         .info-badge {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 10px 20px;
+            background: var(--color-accent-light);
+            color: var(--color-primary);
+            padding: 8px 16px;
             border-radius: 20px;
             display: inline-block;
-            margin: 5px;
-            font-size: 0.9em;
+            margin: 4px;
+            font-size: 0.85em;
+            font-weight: 600;
         }}
         .chart-container {{
-            margin-bottom: 40px;
-            padding: 25px;
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            margin-bottom: clamp(24px, 4vw, 40px);
+            padding: clamp(12px, 3vw, 24px);
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
         }}
-        .chart-controls {{
-            display: flex;
-            gap: 20px;
-            margin-bottom: 20px;
-            padding: 15px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            flex-wrap: wrap;
-            align-items: center;
-        }}
-        .control-group {{
+        .chart-title {{
+            font-size: clamp(1.05em, 2.4vw, 1.4em);
+            font-weight: 700;
+            color: var(--color-primary);
+            margin: 0 0 16px;
             display: flex;
             align-items: center;
             gap: 8px;
-            flex-wrap: wrap;
+        }}
+        /* Accordions used for filter toolbars and the competitor-offer form */
+        details.filters-accordion, details.accordion {{
+            background: var(--color-accent-light);
+            border-radius: var(--radius-md);
+            margin-bottom: 18px;
+            border: 1px solid var(--color-border);
+            overflow: hidden;
+        }}
+        details.accordion {{
+            background: var(--color-surface);
+        }}
+        details.filters-accordion > summary, details.accordion > summary {{
+            list-style: none;
+            cursor: pointer;
+            padding: 12px 18px;
+            font-weight: 700;
+            color: var(--color-primary);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 0.95em;
+        }}
+        details.filters-accordion > summary::-webkit-details-marker,
+        details.accordion > summary::-webkit-details-marker {{
+            display: none;
+        }}
+        details.filters-accordion > summary::after,
+        details.accordion > summary::after {{
+            content: '▾';
+            transition: transform 0.2s;
+            color: var(--color-accent);
+            font-size: 1.1em;
+        }}
+        details[open].filters-accordion > summary::after,
+        details[open].accordion > summary::after {{
+            transform: rotate(180deg);
+        }}
+        .filters-summary-chip {{
+            font-weight: 500;
+            color: var(--color-text-muted);
+            font-size: 0.85em;
+        }}
+        .accordion-body {{
+            padding: 0 18px 18px;
+        }}
+        .chart-controls {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 14px 20px;
+            align-items: end;
+            padding: 16px 18px;
+        }}
+        .control-group {{
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }}
+        .control-group.segmented {{
+            grid-column: 1 / -1;
         }}
         .control-label {{
-            font-weight: bold;
-            color: #2c3e50;
-            font-size: 14px;
+            font-weight: 600;
+            color: var(--color-primary);
+            font-size: 13px;
             white-space: nowrap;
         }}
-        select, button {{
-            padding: 10px 12px;
-            border: 2px solid #667eea;
-            border-radius: 6px;
-            font-size: 14px;
-            font-family: 'Segoe UI', Arial;
-            cursor: pointer;
-            transition: all 0.3s;
-            min-height: 40px;
-        }}
         select {{
-            background: white;
-            color: #2c3e50;
-            min-width: 140px;
+            padding: 9px 12px;
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            font-family: var(--font-sans);
+            cursor: pointer;
+            background: var(--color-surface);
+            color: var(--color-text);
+            min-height: 40px;
+            transition: border-color 0.2s;
         }}
-        select:hover {{
-            border-color: #764ba2;
+        select:hover, select:focus {{
+            border-color: var(--color-accent);
+            outline: none;
         }}
-        button {{
-            background: white;
-            color: #667eea;
-            min-width: 100px;
+        /* Segmented pill control (Anzeigen buttons, SWAP maturity selector) */
+        .segmented-control {{
+            display: inline-flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 999px;
+            padding: 4px;
         }}
-        button.active {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+        .segmented-control button {{
+            border: none;
+            background: transparent;
+            color: var(--color-text-muted);
+            padding: 8px 16px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 600;
+            font-family: var(--font-sans);
+            cursor: pointer;
+            transition: all 0.2s;
+            min-height: 34px;
+            white-space: nowrap;
         }}
-        button:hover {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        .segmented-control button:hover {{
+            color: var(--color-primary);
+        }}
+        .segmented-control button.active {{
+            background: var(--color-primary);
             color: white;
         }}
         .run-info {{
-            background-color: #ecf0f1;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 30px;
-            border-left: 5px solid #3498db;
+            background: var(--color-accent-light);
+            padding: 14px 18px;
+            border-radius: var(--radius-sm);
+            margin-bottom: 24px;
+            border-left: 4px solid var(--color-accent);
         }}
         .run-info h3 {{
             margin-top: 0;
-            margin-bottom: 10px;
-            color: #2c3e50;
-            font-size: 1.0em;
+            margin-bottom: 8px;
+            color: var(--color-primary);
+            font-size: 0.95em;
         }}
         .run-info-text {{
-            color: #2c3e50;
-            font-size: 0.75em;
+            color: var(--color-text-muted);
+            font-size: 0.8em;
             line-height: 1.6;
             margin: 0;
         }}
@@ -1518,72 +1661,62 @@ def generate_html():
         }}
         .table-container {{
             overflow-x: auto;
-            margin-bottom: 30px;
+            margin-bottom: 24px;
         }}
         table {{
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 20px;
-            font-size: 0.95em;
+            margin-bottom: 16px;
+            font-size: 0.9em;
         }}
         th {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--color-primary);
             color: white;
-            padding: 15px 12px;
+            padding: 12px 12px;
             text-align: left;
             font-weight: 600;
             position: sticky;
             top: 0;
         }}
         td {{
-            padding: 12px;
-            border-bottom: 1px solid #ecf0f1;
+            padding: 11px 12px;
+            border-bottom: 1px solid var(--color-border);
         }}
         tr:hover {{
-            background-color: #f8f9fa;
+            background-color: var(--color-accent-light);
         }}
         tr:nth-child(even) {{
-            background-color: #fafbfc;
+            background-color: #f8fafb;
         }}
         .fixierung-cell {{
-            font-weight: bold;
-            color: #2c3e50;
-            background-color: #e8f4f8 !important;
+            font-weight: 700;
+            color: var(--color-primary);
+            background-color: var(--color-accent-light) !important;
+            border-left: 4px solid var(--color-accent);
         }}
         .rate-cell {{
-            font-weight: bold;
-            color: #27ae60;
-            font-size: 1.1em;
+            font-weight: 700;
+            color: var(--color-primary);
+            font-size: 1.05em;
         }}
         .timestamp {{
             text-align: center;
-            color: #7f8c8d;
-            font-size: 0.9em;
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 2px solid #ecf0f1;
+            color: var(--color-text-muted);
+            font-size: 0.85em;
+            margin-top: 28px;
+            padding-top: 18px;
+            border-top: 1px solid var(--color-border);
         }}
         .highlight {{
             background-color: #fff3cd !important;
         }}
         @media (max-width: 768px) {{
             body {{
-                margin: 0;
-                padding: 5px;
+                padding: 8px;
             }}
             .container {{
-                margin: 0;
-                padding: 10px;
-                border-radius: 0;
-                box-shadow: none;
-            }}
-            h1 {{
-                font-size: 1.4em;
-                margin-bottom: 15px;
-            }}
-            .subtitle {{
-                font-size: 0.9em;
-                margin-bottom: 20px;
+                padding: 12px;
+                border-radius: var(--radius-md);
             }}
             .info-badge {{
                 font-size: 0.8em;
@@ -1591,14 +1724,8 @@ def generate_html():
                 margin: 3px;
             }}
             .run-info {{
-                padding: 15px;
-                margin-bottom: 20px;
-            }}
-            .run-info h3 {{
-                font-size: 0.9em;
-            }}
-            .run-info-text {{
-                font-size: 0.7em;
+                padding: 12px 14px;
+                margin-bottom: 18px;
             }}
             .run-info-grid {{
                 display: none;
@@ -1607,33 +1734,18 @@ def generate_html():
                 display: none;
             }}
             .chart-container {{
-                padding: 15px;
-                margin-bottom: 20px;
+                padding: 12px;
+                margin-bottom: 18px;
             }}
             .chart-controls {{
-                flex-direction: column;
-                gap: 15px;
+                grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+                gap: 10px 12px;
                 padding: 12px;
             }}
-            .control-group {{
-                width: 100%;
-                justify-content: space-between;
-                gap: 10px;
-            }}
-            .control-label {{
-                font-size: 13px;
-            }}
-            select, button {{
-                padding: 8px 10px;
-                font-size: 13px;
-                min-height: 36px;
-                flex: 1;
-            }}
-            select {{
-                min-width: auto;
-            }}
-            button {{
-                min-width: auto;
+            .segmented-control button {{
+                padding: 7px 12px;
+                font-size: 12px;
+                min-height: 32px;
             }}
             /* Plotly chart mobile adjustments */
             #plotly-chart {{
@@ -1646,116 +1758,101 @@ def generate_html():
                 display: none !important;
             }}
             table {{
-                font-size: 11px;
-                min-width: 500px;
+                font-size: 13px;
+                min-width: 560px;
             }}
             th, td {{
-                padding: 8px 4px;
+                padding: 9px 8px;
                 white-space: nowrap;
             }}
-            .fixierung-cell {{
-                font-size: 12px;
-            }}
-            .rate-cell {{
-                font-size: 12px;
-            }}
             .table-container {{
-                margin-bottom: 20px;
+                margin-bottom: 18px;
             }}
             .timestamp {{
                 font-size: 0.8em;
-                margin-top: 20px;
-                padding-top: 15px;
+                margin-top: 18px;
+                padding-top: 14px;
             }}
         }}
         @media (max-width: 480px) {{
             body {{
-                padding: 2px;
+                padding: 6px;
             }}
             .container {{
-                padding: 5px;
-            }}
-            h1 {{
-                font-size: 1.2em;
-            }}
-            .chart-container {{
-                padding: 10px;
-            }}
-            .chart-controls {{
                 padding: 8px;
             }}
-            .control-group {{
-                flex-direction: column;
-                align-items: stretch;
-                gap: 8px;
+            .chart-container {{
+                padding: 8px;
             }}
-            .control-label {{
-                text-align: center;
+            .chart-controls {{
+                grid-template-columns: 1fr 1fr;
+                padding: 10px;
             }}
-            select, button {{
+            .control-group.segmented {{
+                grid-column: 1 / -1;
+            }}
+            .segmented-control {{
                 width: 100%;
-                margin: 2px 0;
+                justify-content: stretch;
+            }}
+            .segmented-control button {{
+                flex: 1;
             }}
             #plotly-chart {{
                 height: 300px !important;
             }}
             table {{
-                font-size: 10px;
-                min-width: 450px;
+                font-size: 12px;
+                min-width: 520px;
             }}
             th, td {{
-                padding: 6px 2px;
+                padding: 8px 6px;
             }}
         }}
         .nav-tabs {{
             display: flex;
-            gap: 0;
-            margin-bottom: 30px;
-            border-bottom: 2px solid #ecf0f1;
-            background-color: #f8f9fa;
-            border-radius: 8px 8px 0 0;
-            overflow: hidden;
+            gap: 6px;
+            margin-bottom: 24px;
+            background-color: var(--color-bg);
+            border-radius: 999px;
+            padding: 5px;
         }}
         .nav-tab {{
             flex: 1;
-            padding: 15px 20px;
+            padding: 12px 18px;
             text-align: center;
-            background-color: #e8ecef;
-            color: #495057;
+            background-color: transparent;
+            color: var(--color-text-muted);
             text-decoration: none;
-            font-weight: 600;
-            font-size: 1.1em;
-            transition: all 0.3s ease;
+            font-weight: 700;
+            font-size: 0.95em;
+            transition: all 0.2s ease;
             border: none;
             cursor: pointer;
-            border-bottom: 3px solid transparent;
+            border-radius: 999px;
         }}
         .nav-tab:hover {{
-            background-color: #dee2e6;
-            color: #212529;
+            color: var(--color-primary);
             text-decoration: none;
         }}
         .nav-tab.active {{
-            background-color: white;
-            color: #667eea;
-            border-bottom: 3px solid #667eea;
-        }}
-        .nav-tab:first-child {{
-            border-right: 1px solid #dee2e6;
+            background-color: var(--color-primary);
+            color: white;
+            box-shadow: var(--shadow-sm);
         }}
         @media (max-width: 768px) {{
             .nav-tabs {{
-                margin-bottom: 20px;
+                margin-bottom: 18px;
             }}
             .nav-tab {{
-                padding: 12px 10px;
-                font-size: 0.95em;
+                padding: 10px 10px;
+                font-size: 0.85em;
             }}
         }}
         @media (max-width: 480px) {{
             .nav-tab {{
-                padding: 10px 8px;
-                font-size: 0.85em;
+                padding: 9px 6px;
+                font-size: 0.78em;
             }}
         }}
     </style>
@@ -1767,9 +1864,24 @@ def generate_html():
             <a href="bank_comparison_consumer_loan.html" class="nav-tab">🏦 Consumer Loans</a>
         </div>
         <h1>🏠 Housing Loan Comparison</h1>
-        
+
+        <script>
+            // Filter accordions start expanded on desktop, collapsed on mobile.
+            // Runs on DOMContentLoaded since this script tag is parsed before
+            // the accordions further down the page exist yet.
+            document.addEventListener('DOMContentLoaded', function() {{
+                document.querySelectorAll('details.filters-accordion').forEach(function(d) {{
+                    d.open = window.innerWidth > 768;
+                }});
+            }});
+        </script>
+
         <div class="chart-container">
-            <div class="chart-controls">
+            <div class="chart-title">📈 Wohnkredite - Durchblicker-Bestpreis</div>
+            <details class="filters-accordion">
+                <summary>🔧 Filter &amp; Anzeige</summary>
+                <div class="accordion-body">
+                <div class="chart-controls">
                 <div class="control-group">
                     <span class="control-label">Laufzeit:</span>
                     <select id="laufzeit-filter">
@@ -1782,16 +1894,20 @@ def generate_html():
                         <option value="all">Alle Fixlaufzeiten</option>
 {f''.join([f'                        <option value="{fx}">{fx} Jahre</option>\n' for fx in fixierung_values])}                    </select>
                 </div>
-                <div class="control-group">
+                <div class="control-group segmented">
                     <span class="control-label">Anzeigen:</span>
-                    <button id="btn-beide" onclick="setZinssatzFilter('beide')">Beide</button>
-                    <button id="btn-zinssatz" onclick="setZinssatzFilter('zinssatz')">Nur Zinssatz</button>
-                    <button id="btn-effektiver" class="active" onclick="setZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
+                    <div class="segmented-control">
+                        <button id="btn-beide" onclick="setZinssatzFilter('beide')">Beide</button>
+                        <button id="btn-zinssatz" onclick="setZinssatzFilter('zinssatz')">Nur Zinssatz</button>
+                        <button id="btn-effektiver" class="active" onclick="setZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
+                    </div>
                 </div>
-            </div>
-            
+                </div>
+                </div>
+            </details>
+
             {chart_html}
-            
+
             <script>
                 // Store trace metadata
                 const traceMetadata = {json.dumps(trace_metadata)};
@@ -1987,8 +2103,12 @@ def generate_html():
         </div>
         
 {f'''
-        <div class="chart-container" style="margin-top: 50px;">
-            <div class="chart-controls">
+        <div class="chart-container" style="margin-top: 40px;">
+            <div class="chart-title">💳 Wohnkredite - Konkurrenzangebote</div>
+            <details class="filters-accordion">
+                <summary>🔧 Filter &amp; Anzeige</summary>
+                <div class="accordion-body">
+                <div class="chart-controls">
                 <div class="control-group">
                     <span class="control-label">Laufzeit:</span>
                     <select id="individual-laufzeit-filter">
@@ -2001,16 +2121,20 @@ def generate_html():
                         <option value="all">Alle Fixlaufzeiten</option>
 {f''.join([f'                        <option value="{fx}">{fx} Jahre</option>\n' for fx in individual_fixierung_values])}                    </select>
                 </div>
-                <div class="control-group">
+                <div class="control-group segmented">
                     <span class="control-label">Anzeigen:</span>
-                    <button id="individual-btn-beide" onclick="setIndividualZinssatzFilter('beide')">Beide</button>
-                    <button id="individual-btn-zinssatz" onclick="setIndividualZinssatzFilter('zinssatz')">Nur Zinssatz</button>
-                    <button id="individual-btn-effektiver" class="active" onclick="setIndividualZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
+                    <div class="segmented-control">
+                        <button id="individual-btn-beide" onclick="setIndividualZinssatzFilter('beide')">Beide</button>
+                        <button id="individual-btn-zinssatz" onclick="setIndividualZinssatzFilter('zinssatz')">Nur Zinssatz</button>
+                        <button id="individual-btn-effektiver" class="active" onclick="setIndividualZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
+                    </div>
                 </div>
-            </div>
-            
-            {individual_chart_html if individual_chart_html else '<p style="text-align: center; color: #7f8c8d; padding: 40px;">Keine Konkurrenzangebote verfügbar</p>'}
-            
+                </div>
+                </div>
+            </details>
+
+            {individual_chart_html if individual_chart_html else '<p style="text-align: center; color: var(--color-text-muted); padding: 40px;">Keine Konkurrenzangebote verfügbar</p>'}
+
             <script>
                 // Store trace metadata for individual offers chart
                 const individualTraceMetadata = {json.dumps(individual_trace_metadata) if individual_chart_html else '[]'};
@@ -2131,10 +2255,9 @@ def generate_html():
 ''' if individual_chart_html else ''}
 
         <!-- Angebotserfassung Formular -->
-        <div class="form-container" style="margin-top: 40px; padding: 30px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; border: 1px solid #dee2e6;">
-            <h2 style="color: #2c3e50; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;">
-                ➕ Neues Konkurrenzangebot erfassen
-            </h2>
+        <details class="accordion" style="margin-top: 32px;">
+            <summary>➕ Neues Konkurrenzangebot erfassen</summary>
+            <div class="accordion-body">
             <form id="offer-form" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
                 <div class="form-group">
                     <label for="anbieter" style="display: block; margin-bottom: 5px; font-weight: 600; color: #495057;">Bank/Anbieter *</label>
@@ -2179,7 +2302,8 @@ def generate_html():
                     <span id="form-status" style="color: #6c757d; font-size: 14px;"></span>
                 </div>
             </form>
-        </div>
+            </div>
+        </details>
 
         <script>
             // Offer form submission handler
@@ -2290,7 +2414,8 @@ def generate_html():
     
     # Add SWAP/Euribor section if charts are available
     swap_euribor_section_html = generate_swap_euribor_section_html(
-        swap_chart_html, euribor_chart_html, swap_png_base64, euribor_png_base64, for_email=False
+        swap_chart_html, euribor_chart_html, swap_png_base64, euribor_png_base64,
+        for_email=False, swap_maturities=swap_maturities
     )
     html_content += swap_euribor_section_html
     
@@ -2333,12 +2458,12 @@ def generate_email_html(png_base64, individual_png_base64=None):
     print("[INFO] Generating SWAP/Euribor charts for email...")
     swap_chart_result = generate_swap_rates_chart()
     euribor_chart_result = generate_euribor_chart()
-    
+
     if swap_chart_result[0]:
-        swap_chart_html, swap_png_base64 = swap_chart_result
+        swap_chart_html, swap_maturities, swap_png_base64 = swap_chart_result
     else:
-        swap_chart_html, swap_png_base64 = None, None
-    
+        swap_chart_html, swap_maturities, swap_png_base64 = None, [], None
+
     if euribor_chart_result[0]:
         euribor_chart_html, euribor_png_base64 = euribor_chart_result
     else:

@@ -27,6 +27,66 @@ try:
 except ImportError:
     pass
 
+# Persisting the numeric chart data is best-effort: db_helper may be missing
+# in some deployments, and this script must keep working screenshot-only if so.
+try:
+    from db_helper import save_oenb_series_data
+    _DB_HELPER_AVAILABLE = True
+except ImportError:
+    _DB_HELPER_AVAILABLE = False
+
+# JS extraction, tried against the two chart widget technologies we might be
+# looking at (unverified against the live OeNB Shiny app - this dashboard was
+# never inspected with real browser devtools from this environment; if the
+# widget type turns out to be something else, this needs one more strategy
+# added here, e.g. by opening devtools on the live page and running
+# `document.getElementById(chartId)` to see what's rendered inside it).
+_CHART_DATA_JS = """
+return (function(chartId) {
+    try {
+        var el = document.getElementById(chartId);
+        if (!el) return null;
+
+        // Strategy 1: Plotly htmlwidget - the container itself or a
+        // descendant carries class 'js-plotly-plot' and a `.data` array.
+        var plotlyDiv = (el.classList && el.classList.contains('js-plotly-plot'))
+            ? el : el.querySelector('.js-plotly-plot');
+        if (plotlyDiv && plotlyDiv.data) {
+            return plotlyDiv.data.map(function(trace) {
+                return {
+                    name: trace.name || '',
+                    x: (trace.x || []).map(String),
+                    y: trace.y || []
+                };
+            });
+        }
+
+        // Strategy 2: Highcharts - find the chart whose render target is
+        // this element (or is contained by it).
+        if (window.Highcharts && Highcharts.charts) {
+            for (var i = 0; i < Highcharts.charts.length; i++) {
+                var c = Highcharts.charts[i];
+                if (c && c.renderTo && (c.renderTo.id === chartId || el.contains(c.renderTo))) {
+                    return c.series.map(function(s) {
+                        var xData = s.xData || [];
+                        var yData = s.yData || [];
+                        return {
+                            name: s.name || '',
+                            x: xData.map(String),
+                            y: yData
+                        };
+                    });
+                }
+            }
+        }
+
+        return null;
+    } catch (e) {
+        return null;
+    }
+})(arguments[0]);
+"""
+
 
 def timeout_handler(signum, frame):
     """Signal handler for timeout"""
@@ -198,18 +258,60 @@ class OeNBNachfrageScraper:
     def take_all_chart_screenshots(self) -> dict:
         """Take screenshots of all charts"""
         screenshots = {}
-        
+
         chart_ids = [
             "demand_verah_durchschn_kreditsumme_chart",
             "demand_nkv_zins_chart"
         ]
-        
+
         for chart_id in chart_ids:
             screenshot_path = self.take_chart_screenshot(chart_id)
             if screenshot_path:
                 screenshots[chart_id] = screenshot_path
-        
+
         return screenshots
+
+    def extract_chart_data(self, chart_id: str) -> Optional[list]:
+        """
+        Best-effort extraction of the numeric series underlying a chart, so
+        the HTML report can show a "last 5 periods" table under the
+        screenshot (a screenshot's pixels can't be read back into numbers).
+
+        Returns a list of {'name': str, 'points': [(period_label, value), ...]}
+        (chronological order), or None if the widget type wasn't recognized
+        or extraction failed - callers must treat that as "no data available",
+        not as an error, and keep the screenshot-only flow working.
+        """
+        try:
+            raw = self.driver.execute_script(_CHART_DATA_JS, chart_id)
+        except Exception as e:
+            print(f"[WARN] Could not execute chart-data extraction script for '{chart_id}': {e}")
+            return None
+
+        if not raw:
+            print(f"[WARN] No recognizable chart widget data found for '{chart_id}' "
+                  f"(extraction covers Plotly/Highcharts widgets only)")
+            return None
+
+        series = []
+        for trace in raw:
+            xs = trace.get('x') or []
+            ys = trace.get('y') or []
+            points = [(x, y) for x, y in zip(xs, ys) if y is not None]
+            if points:
+                series.append({'name': trace.get('name') or chart_id, 'points': points})
+
+        return series or None
+
+    def save_chart_data(self, chart_id: str, series: list) -> None:
+        """Persist extracted series data via db_helper, if available."""
+        if not _DB_HELPER_AVAILABLE:
+            print("[WARN] db_helper not importable - skipping OeNB data-table persistence")
+            return
+        try:
+            save_oenb_series_data(chart_id, series)
+        except Exception as e:
+            print(f"[WARN] Could not save OeNB series data for '{chart_id}': {e}")
     
     def run(self) -> dict:
         """Run the complete scraping process
@@ -234,7 +336,15 @@ class OeNBNachfrageScraper:
             
             # Take screenshots of all available charts
             screenshots = self.take_all_chart_screenshots()
-            
+
+            # Best-effort: also pull the underlying numeric series so the
+            # HTML report can show a last-5-periods data table under each
+            # screenshot. Never lets a failure here break the screenshot flow.
+            for chart_id in screenshots:
+                series = self.extract_chart_data(chart_id)
+                if series:
+                    self.save_chart_data(chart_id, series)
+
             if screenshots:
                 print("[OK] Scraping process completed successfully")
             else:
