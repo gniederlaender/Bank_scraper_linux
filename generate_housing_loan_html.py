@@ -86,6 +86,65 @@ def parse_percent_string(value: Optional[str]) -> Optional[float]:
         return None
 
 
+def format_percent_short(value: Optional[float]) -> str:
+    """Format a parsed rate as a compact '3,320%' string (no ' p.a.' suffix etc.)."""
+    if value is None:
+        return '–'
+    return f'{value:.3f}'.replace('.', ',') + '%'
+
+
+def parse_scrape_date(value) -> Optional[datetime]:
+    """Parse a scraping_runs.scrape_date value (datetime or sqlite string) into a datetime."""
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return None
+    text = str(value).strip()
+    for fmt in ('%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S',
+                '%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def find_previous_run(sorted_runs, min_gap_days: int = 6):
+    """
+    Find the most recent run at least `min_gap_days` before the latest run in
+    `sorted_runs` (already sorted by scrape_date descending, each item shaped
+    like {'run': {...}, 'variations': [...]}).
+
+    The pipeline normally runs weekly (Mondays), so the trend table should
+    compare week-over-week. Just taking "the second most recent run" breaks
+    this whenever the pipeline runs more than once in the same week (e.g.
+    while testing) - it would then compare against a run from hours ago
+    instead of the previous week, making the trend meaningless.
+
+    Returns None if there's no run far enough in the past yet.
+    """
+    if len(sorted_runs) < 2:
+        return None
+
+    latest_date = parse_scrape_date(sorted_runs[0]['run']['scrape_date'])
+    if latest_date is None:
+        # Can't determine the gap reliably; fall back to the immediately
+        # preceding run rather than showing no trend at all.
+        return sorted_runs[1]
+
+    for candidate in sorted_runs[1:]:
+        candidate_date = parse_scrape_date(candidate['run']['scrape_date'])
+        if candidate_date is None:
+            continue
+        if (latest_date - candidate_date).days >= min_gap_days:
+            return candidate
+
+    return None
+
+
 def compute_trend_rows(variations, previous_variations):
     """
     Build trend rows comparing each Fixlaufzeit's Sollzins between the
@@ -129,6 +188,8 @@ def compute_trend_rows(variations, previous_variations):
             'fixierung_jahre': fixierung,
             'current_str': current_str,
             'previous_str': previous_str,
+            'current_short': format_percent_short(current_val),
+            'previous_short': format_percent_short(previous_val),
             'trend': trend
         })
 
@@ -412,77 +473,86 @@ def generate_individual_offers_chart():
             
     # Create figure
     fig = go.Figure()
-    
-    # Group offers by bank for consistent coloring
+
+    # Group offers by (bank, Fixlaufzeit, Laufzeit) so offers for the same
+    # bank/product combo connect into one trend line instead of a cloud of
+    # disconnected points - a single offer per bank per date was unreadable
+    # once there were more than a handful of competitor entries. Traces stay
+    # homogeneous in laufzeit/fixierung/anbieter so the existing trace-level
+    # filter logic (customdata[0]) still works unchanged.
     bank_colors = {}
-    
-    # Add traces for each offer
+    groups = {}
     for offer in user_offers:
         anbieter = offer['anbieter']
-        date = offer['angebotsdatum']
-        laufzeit_numeric = offer.get('laufzeit_numeric')
-        fixzins_years = offer.get('fixzinssatz_in_jahren_numeric')
-        fixzins_display = offer.get('fixzinssatz_in_jahren_display') or "n/a"
-
-        # Get or assign color for this bank
         if anbieter not in bank_colors:
             bank_colors[anbieter] = get_bank_color(anbieter)
-        color = bank_colors[anbieter]
+        key = (anbieter, offer.get('fixzinssatz_in_jahren_numeric'), offer.get('laufzeit_numeric'))
+        groups.setdefault(key, []).append(offer)
 
-        # Trace for fixzinssatz (solid line marker)
+    for (anbieter, fixzins_years, laufzeit_numeric), offers in groups.items():
+        offers_sorted = sorted(offers, key=lambda o: o['angebotsdatum'])
+        color = bank_colors[anbieter]
+        fixzins_display = offers_sorted[-1].get('fixzinssatz_in_jahren_display') or "n/a"
+        laufzeit_display = offers_sorted[-1].get('laufzeit', 'N/A')
+        label_suffix = f' ({fixzins_display} fix)' if fixzins_display != 'n/a' else ''
+
+        dates = [o['angebotsdatum'] for o in offers_sorted]
+        fixzins_vals = [o['fixzinssatz'] for o in offers_sorted]
+        eff_vals = [o['effektivzinssatz'] for o in offers_sorted]
+        legendgroup = f'{anbieter}_{fixzins_years}_{laufzeit_numeric}'
+
+        # Trace for Fixzins (solid line - single offers render as a lone marker)
         fig.add_trace(go.Scatter(
-            x=[date],
-            y=[offer['fixzinssatz']],
-            mode='markers',
-            name=f'{anbieter} - Fixzins',
-            line=dict(color=color, width=2),
+            x=dates,
+            y=fixzins_vals,
+            mode='lines+markers',
+            name=f'{anbieter} - Fixzins{label_suffix}',
+            line=dict(color=color, width=2.5),
             marker=dict(
-                size=16,
+                size=11,
                 symbol='star',
                 color=color,
                 opacity=0.9,
                 line=dict(width=1.5, color=COLOR_PRIMARY)
             ),
-            legendgroup=anbieter,
+            legendgroup=legendgroup,
             hovertemplate=(
                 f'<b>{anbieter}</b><br>'
                 'Datum: %{x|%d.%m.%Y}<br>'
-                f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
-                f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
-                f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
+                'Fixzins: %{y:.3f}%<br>'
+                f'Laufzeit: {laufzeit_display}<br>'
                 f'Fixzinsperiode: {fixzins_display}<br>'
                 '<extra></extra>'
             ),
             visible=True,  # Visible by default
-            customdata=[[laufzeit_numeric, 'user_offer_fix', fixzins_years, anbieter]]
+            customdata=[[laufzeit_numeric, 'user_offer_fix', fixzins_years, anbieter]] * len(dates)
         ))
 
-        # Trace for effektivzinssatz (dashed line marker)
+        # Trace for Effektivzinssatz (dashed line)
         fig.add_trace(go.Scatter(
-            x=[date],
-            y=[offer['effektivzinssatz']],
-            mode='markers',
-            name=f'{anbieter} - Eff. Zins',
+            x=dates,
+            y=eff_vals,
+            mode='lines+markers',
+            name=f'{anbieter} - Eff. Zins{label_suffix}',
             line=dict(color=color, width=2, dash='dash'),
             marker=dict(
-                size=13,
+                size=9,
                 symbol='diamond',
                 color=color,
                 opacity=0.9,
                 line=dict(width=1.5, color=COLOR_PRIMARY)
             ),
-            legendgroup=anbieter,
+            legendgroup=legendgroup,
             hovertemplate=(
                 f'<b>{anbieter}</b><br>'
                 'Datum: %{x|%d.%m.%Y}<br>'
-                f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
-                f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
-                f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
+                'Eff. Zins: %{y:.3f}%<br>'
+                f'Laufzeit: {laufzeit_display}<br>'
                 f'Fixzinsperiode: {fixzins_display}<br>'
                 '<extra></extra>'
             ),
             visible=True,  # Visible by default
-            customdata=[[laufzeit_numeric, 'user_offer_eff', fixzins_years, anbieter]]
+            customdata=[[laufzeit_numeric, 'user_offer_eff', fixzins_years, anbieter]] * len(dates)
         ))
                 
     # Store trace metadata for JavaScript filtering
@@ -605,17 +675,19 @@ def generate_static_png_individual_offers(user_offers, bank_colors):
         sorted_dates, sorted_values = zip(*sorted_data) if sorted_data else ([], [])
         
         if sorted_dates:
-            # Use scatter for marker-only visualization (no connecting lines)
-            plt.scatter(
+            # Connect same-bank offers chronologically so trends are visible
+            # at a glance instead of a cloud of disconnected markers
+            plt.plot(
                 sorted_dates,
                 sorted_values,
                 marker='d',
-                s=100,  # Marker size
+                markersize=9,
+                linewidth=2,
                 color=color,
                 label=anbieter,
-                alpha=0.8,
-                edgecolors='black',
-                linewidths=1.5
+                alpha=0.85,
+                markeredgecolor=COLOR_PRIMARY,
+                markeredgewidth=1.2
             )
     
     # Customize plot with date range in title
@@ -1501,10 +1573,12 @@ def generate_html():
     latest_by_laufzeit = {}
     previous_by_laufzeit = {}
     for laufzeit, runs_list in runs_by_laufzeit.items():
-        # Sort by date descending and get the latest + previous run
+        # Sort by date descending and get the latest + previous run (at least
+        # 6 days earlier, so re-running the pipeline mid-week during testing
+        # doesn't turn the trend into a same-day/same-week comparison)
         sorted_runs = sorted(runs_list, key=lambda x: x['run']['scrape_date'], reverse=True)
         latest_by_laufzeit[laufzeit] = sorted_runs[0]
-        previous_by_laufzeit[laufzeit] = sorted_runs[1] if len(sorted_runs) > 1 else None
+        previous_by_laufzeit[laufzeit] = find_previous_run(sorted_runs, min_gap_days=6)
 
     # Prepare table data for JavaScript (must be JSON-serializable)
     table_data_for_js = {}
@@ -1530,8 +1604,8 @@ def generate_html():
         f'''
                         <tr>
                             <td class="fixierung-cell">{row['fixierung_jahre']}J</td>
-                            <td>{row['previous_str'] or '–'}</td>
-                            <td>{row['current_str'] or '–'}</td>
+                            <td>{row['previous_short']}</td>
+                            <td>{row['current_short']}</td>
                             <td>{trend_badge_html(row['trend'])}</td>
                         </tr>'''
         for row in initial_trend_rows
@@ -1821,7 +1895,7 @@ def generate_html():
                 min-height: 32px;
             }}
             /* Plotly chart mobile adjustments */
-            #plotly-chart {{
+            #plotly-chart, #plotly-individual-offers-chart {{
                 height: 400px !important;
             }}
             .js-plotly-plot .plotly .modebar {{
@@ -1871,7 +1945,7 @@ def generate_html():
             .segmented-control button {{
                 flex: 1;
             }}
-            #plotly-chart {{
+            #plotly-chart, #plotly-individual-offers-chart {{
                 height: 300px !important;
             }}
             table {{
@@ -1986,9 +2060,9 @@ def generate_html():
                 <table>
                     <thead>
                         <tr>
-                            <th>Fixlaufzeit</th>
-                            <th>Sollzins voriger Lauf</th>
-                            <th>Sollzins aktueller Lauf</th>
+                            <th>FixLZ</th>
+                            <th>Voriger Lauf</th>
+                            <th>Aktueller Lauf</th>
                             <th>Trend</th>
                         </tr>
                     </thead>
@@ -2070,6 +2144,12 @@ def generate_html():
                     return isNaN(num) ? null : num;
                 }}
 
+                // Compact '3,320%' display - no ' p.a.' suffix or fixierung annotations
+                function formatSollzins(value) {{
+                    if (value === null || value === undefined) return '–';
+                    return value.toFixed(3).replace('.', ',') + '%';
+                }}
+
                 function trendBadge(trend) {{
                     if (trend === 'up') return '<span style="color:#c0392b; font-weight:700;">▲ Anstieg</span>';
                     if (trend === 'down') return '<span style="color:#1e8449; font-weight:700;">▼ Rückgang</span>';
@@ -2109,8 +2189,8 @@ def generate_html():
                         trendTable += `
                                 <tr>
                                     <td class="fixierung-cell">${{v.fixierung_jahre}}J</td>
-                                    <td>${{previousStr || '–'}}</td>
-                                    <td>${{currentStr || '–'}}</td>
+                                    <td>${{formatSollzins(previousVal)}}</td>
+                                    <td>${{formatSollzins(currentVal)}}</td>
                                     <td>${{trendBadge(trend)}}</td>
                                 </tr>`;
                     }});
@@ -2174,6 +2254,13 @@ def generate_html():
                             margin: newMargin,
                             showlegend: showLegend
                         }});
+                        // fig.to_html() wraps the graph div in a static outer <div
+                        // style="height:600px">; Plotly.relayout only resizes the
+                        // inner div/SVG, so without this the outer wrapper stays at
+                        // its original height and leaves dead space below the chart.
+                        if (chartDiv.parentElement) {{
+                            chartDiv.parentElement.style.height = newHeight + 'px';
+                        }}
                     }}
                 }}
                 
@@ -2296,12 +2383,21 @@ def generate_html():
                             margin: newMargin,
                             showlegend: showLegend
                         }});
+                        // Same fix as the main chart's handleResize: the outer
+                        // wrapper div from fig.to_html() has a static inline
+                        // height that Plotly.relayout doesn't touch.
+                        if (chartDiv.parentElement) {{
+                            chartDiv.parentElement.style.height = newHeight + 'px';
+                        }}
                     }}
                 }}
                 
-                // Call on load and resize
+                // Call on load and resize, with a timeout fallback in case 'load'
+                // has already fired by the time this script runs (mirrors the
+                // main chart's handleResize, which uses the same fallback)
                 window.addEventListener('load', handleIndividualChartResize);
                 window.addEventListener('resize', handleIndividualChartResize);
+                setTimeout(handleIndividualChartResize, 1000);
                 
                 // Laufzeit dropdown change handler for individual offers
                 const individualLaufzeitFilter = document.getElementById('individual-laufzeit-filter');

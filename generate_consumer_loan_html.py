@@ -789,6 +789,13 @@ def generate_html():
                             margin: newMargin,
                             showlegend: showLegend
                         }});
+                        // fig.to_html() wraps the graph div in a static outer <div
+                        // style="height:600px">; Plotly.relayout only resizes the
+                        // inner div/SVG, so without this the outer wrapper stays at
+                        // its original height and leaves dead space below the chart.
+                        if (chartDiv.parentElement) {{
+                            chartDiv.parentElement.style.height = newHeight + 'px';
+                        }}
                     }}
                 }}
                 

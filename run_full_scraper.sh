@@ -81,35 +81,45 @@ fi
 echo ""
 
 # Step 2b: Update SWAP/Euribor rates from ECB and Sparkasse APIs
-echo "Step 2b: Updating SWAP/Euribor rates..."
-# Calculate date range: 12 months back to current month
-START_DATE=$(date -d "12 months ago" +%Y-%m)
-END_DATE=$(date +%Y-%m)
-python3 swap_data_fetcher.py --start "$START_DATE" --end "$END_DATE" --output swap_data.js
-SWAP_EXIT=$?
-
-if [ $SWAP_EXIT -ne 0 ]; then
-    echo "⚠️  SWAP/Euribor rates update failed (exit code: $SWAP_EXIT)"
-    echo "   Continuing with cached rates..."
+if [ "$NOSCRAPING" = true ]; then
+    echo "Step 2b: Skipping SWAP/Euribor rates update (--noscraping)"
+    echo ""
 else
-    echo "✅ SWAP/Euribor rates updated successfully!"
-fi
+    echo "Step 2b: Updating SWAP/Euribor rates..."
+    # Calculate date range: 12 months back to current month
+    START_DATE=$(date -d "12 months ago" +%Y-%m)
+    END_DATE=$(date +%Y-%m)
+    python3 swap_data_fetcher.py --start "$START_DATE" --end "$END_DATE" --output swap_data.js
+    SWAP_EXIT=$?
 
-echo ""
+    if [ $SWAP_EXIT -ne 0 ]; then
+        echo "⚠️  SWAP/Euribor rates update failed (exit code: $SWAP_EXIT)"
+        echo "   Continuing with cached rates..."
+    else
+        echo "✅ SWAP/Euribor rates updated successfully!"
+    fi
+
+    echo ""
+fi
 
 # Step 3: Run OeNB Nachfrage scraper to capture dashboard charts
-echo "Step 3: Running OeNB Nachfrage scraper..."
-python3 oenb_nachfrage_scraper.py
-OENB_EXIT=$?
-
-if [ $OENB_EXIT -ne 0 ]; then
-    echo "⚠️  OeNB scraper failed with exit code: $OENB_EXIT"
-    echo "   Continuing without OeNB charts..."
+if [ "$NOSCRAPING" = true ]; then
+    echo "Step 3: Skipping OeNB Nachfrage scraper (--noscraping)"
+    echo ""
 else
-    echo "✅ OeNB scraper completed successfully!"
-fi
+    echo "Step 3: Running OeNB Nachfrage scraper..."
+    python3 oenb_nachfrage_scraper.py
+    OENB_EXIT=$?
 
-echo ""
+    if [ $OENB_EXIT -ne 0 ]; then
+        echo "⚠️  OeNB scraper failed with exit code: $OENB_EXIT"
+        echo "   Continuing without OeNB charts..."
+    else
+        echo "✅ OeNB scraper completed successfully!"
+    fi
+
+    echo ""
+fi
 
 # Step 4: Generate housing loan HTML report with chart
 echo "Step 4: Generating housing loan HTML report and chart..."
