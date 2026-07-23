@@ -48,6 +48,7 @@ class ECBDataFetcher:
     """Fetches Euribor data from ECB Statistical Data Warehouse API"""
 
     BASE_URL = "https://data-api.ecb.europa.eu/service/data"
+    # Monthly frequency - we'll expand to weekly in the consumer
     EURIBOR_3M_KEY = "FM/M.U2.EUR.RT.MM.EURIBOR3MD_.HSTA"
 
     def __init__(self, timeout: int = 30):
@@ -61,13 +62,14 @@ class ECBDataFetcher:
     def fetch_euribor_3m(self, start_period: str, end_period: str) -> Dict[str, float]:
         """
         Fetch Euribor 3M monthly rates from ECB
+        Returns monthly rates that will be mapped to weekly periods by the caller
 
         Args:
             start_period: Start date in YYYY-MM format
             end_period: End date in YYYY-MM format
 
         Returns:
-            Dict mapping period (YYYY-MM) to rate value
+            Dict mapping period (YYYY-MM) to monthly rate
         """
         url = f"{self.BASE_URL}/{self.EURIBOR_3M_KEY}"
         params = {
@@ -267,36 +269,30 @@ query NotationTimeSeries($notationId: NotationId!, $period: TimeSeriesPeriod!, $
                     ts_data = data[0]["data"]["notationTimeSeries"]
                     objects = ts_data.get("objects", [])
                     
-                    # Aggregate daily data points to monthly averages
-                    monthly_data = {}  # {YYYY-MM: [values]}
-                    
-                    # Calculate end of end_date month to include all days in that month
-                    if end_date.month == 12:
-                        end_of_month = datetime(end_date.year + 1, 1, 1)
-                    else:
-                        end_of_month = datetime(end_date.year, end_date.month + 1, 1)
-                    
+                    # Use daily data points directly (no aggregation)
+                    # Format: YYYY-MM-DD
+                    daily_data = {}
+
+                    # Calculate end date extension
+                    end_dt_extended = end_date + timedelta(days=7)
+
                     # Process objects: [[timestamp_ms, value], ...]
                     for item in objects:
                         if isinstance(item, list) and len(item) >= 2:
                             timestamp_ms = item[0]
                             value = item[1]
-                            
+
                             # Convert timestamp (milliseconds) to datetime
                             dt = datetime.fromtimestamp(timestamp_ms / 1000)
-                            
+
                             # Only include dates within our requested range
-                            # Include all dates from start_date to end of end_date's month
-                            if start_date <= dt < end_of_month:
-                                period = dt.strftime('%Y-%m')
-                                if period not in monthly_data:
-                                    monthly_data[period] = []
-                                monthly_data[period].append(float(value))
-                    
-                    # Calculate monthly averages
-                    for period, values in monthly_data.items():
-                        if values:
-                            rates[period] = sum(values) / len(values)
+                            if start_date <= dt < end_dt_extended:
+                                # Use ISO date format: YYYY-MM-DD
+                                period = dt.strftime('%Y-%m-%d')
+                                daily_data[period] = float(value)
+
+                    # Return daily data
+                    rates = daily_data
             
             return rates
 
@@ -609,41 +605,40 @@ def fetch_all_rates(start_date: datetime, end_date: datetime,
             logger.info(f"Saving merged SWAP data to {manual_swap_path}")
             save_swap_rates_to_manual(swap_rates, manual_swap_path)
 
-    # Combine into output format
+    # Combine into output format - daily data
     result = []
 
-    current = start_date.replace(day=1)
-    while current <= end_date:
-        period = current.strftime('%Y-%m')
+    # Iterate through each day
+    current = start_date
+    end_extended = end_date + timedelta(days=7)
 
-        month_data = {
-            "year": current.year,
-            "month": current.month,
-            "monthName": f"{GERMAN_MONTHS[current.month - 1]} {current.year}",
+    while current <= end_extended:
+        period = current.strftime('%Y-%m-%d')
+
+        day_data = {
+            "date": period,  # ISO date
             "rates": {}
         }
 
-        # Add Euribor 3M
-        if period in euribor_rates:
-            month_data["rates"]["3M"] = round(euribor_rates[period], 2)
+        # Add Euribor 3M (map from monthly to daily - use the month's rate for all days in that month)
+        month_period = f"{current.year:04d}-{current.month:02d}"
+        if month_period in euribor_rates:
+            day_data["rates"]["3M"] = round(euribor_rates[month_period], 2)
 
-        # Add SWAP rates
+        # Add SWAP rates (daily data)
         if period in swap_rates:
             for maturity, rate in swap_rates[period].items():
-                month_data["rates"][maturity] = round(rate, 2)
+                day_data["rates"][maturity] = round(rate, 2)
 
         # Only add if we have at least some data
-        if month_data["rates"]:
-            result.append(month_data)
+        if day_data["rates"]:
+            result.append(day_data)
         else:
-            # Add placeholder with warning
-            logger.warning(f"No rate data available for {period}")
+            # Skip days without data (don't warn - normal for weekends/future)
+            pass
 
-        # Move to next month
-        if current.month == 12:
-            current = current.replace(year=current.year + 1, month=1)
-        else:
-            current = current.replace(month=current.month + 1)
+        # Move to next day
+        current += timedelta(days=1)
 
     return result
 
@@ -653,24 +648,33 @@ def generate_swap_data_js(data: List[Dict], output_path: Path) -> None:
     Generate swap_data.js file from fetched data
 
     Args:
-        data: List of monthly rate data
+        data: List of daily rate data
         output_path: Path to output swap_data.js file
     """
     # Format data as JavaScript
     data_json = json.dumps(data, ensure_ascii=False, indent=4)
 
+    # Get date range label
+    if data:
+        start_label = data[0].get("date", "N/A")
+        end_label = data[-1].get("date", "N/A")
+        date_range = f"{start_label} - {end_label}"
+    else:
+        date_range = "N/A"
+
     js_content = f'''// EUR SWAP Rates Data
 // Historical EUR Interest Rate Swap rates for Hauptfixlaufzeiten
 // Data represents mid-market rates for major maturities
+// Daily data points (business days)
 //
 // AUTO-GENERATED by swap_data_fetcher.py - Do not edit manually
 // Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 //
 // Data Sources:
-// - Euribor 3M: ECB Statistical Data Warehouse
-// - SWAP rates: Sparkasse.at / Erste Group (FactSet)
+// - Euribor 3M: ECB Statistical Data Warehouse (monthly data applied to all days)
+// - SWAP rates: Sparkasse.at / Erste Group (FactSet, daily values)
 //
-// Date Range: {data[0]["monthName"] if data else "N/A"} - {data[-1]["monthName"] if data else "N/A"}
+// Date Range: {date_range}
 
 const eurSwapRates = {data_json};
 '''
@@ -679,7 +683,7 @@ const eurSwapRates = {data_json};
         f.write(js_content)
 
     logger.info(f"Generated swap_data.js: {output_path}")
-    logger.info(f"Contains {len(data)} months of data")
+    logger.info(f"Contains {len(data)} days of data")
 
 
 # CLI interface for standalone testing

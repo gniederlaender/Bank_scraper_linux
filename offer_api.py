@@ -34,31 +34,71 @@ API_HOST = os.getenv('OFFER_API_HOST', '127.0.0.1')
 ALLOWED_ORIGIN = os.getenv('OFFER_API_ALLOWED_ORIGIN')
 
 app = Flask(__name__)
+app.url_map.strict_slashes = False  # Allow both /offers and /offers/
 CORS(app, origins=[ALLOWED_ORIGIN] if ALLOWED_ORIGIN else [])
 
 
 def ensure_loan_offers_table():
-    """Create the loan_offers table if it doesn't exist."""
+    """Ensure the loan_offers table has the required columns."""
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS loan_offers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            anbieter TEXT NOT NULL,
-            angebotsdatum TEXT NOT NULL,
-            fixzinssatz TEXT,
-            effektivzinssatz TEXT,
-            laufzeit TEXT,
-            fixzinssatz_in_jahren TEXT,
-            fileName TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+    # Check if table exists
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='loan_offers'")
+    table_exists = cursor.fetchone() is not None
+
+    if not table_exists:
+        # Create table with full schema matching existing structure
+        cursor.execute("""
+            CREATE TABLE loan_offers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fileName TEXT NOT NULL,
+                anbieter TEXT,
+                angebotsdatum TEXT,
+                nominale TEXT,
+                kreditbetrag TEXT,
+                laufzeit TEXT,
+                anzahlRaten TEXT,
+                sollzins TEXT,
+                fixzinssatz TEXT,
+                fixzinssatzBis TEXT,
+                gebuehren TEXT,
+                monatsrate TEXT,
+                gesamtbetrag TEXT,
+                rawJson TEXT NOT NULL,
+                processingTime INTEGER NOT NULL,
+                confidence REAL NOT NULL,
+                createdAt TEXT DEFAULT (datetime('now')),
+                effektivzinssatz TEXT,
+                fixzinssatz_in_jahren TEXT,
+                auszahlungsbetrag TEXT,
+                auszahlungsdatum TEXT,
+                datum1Rate TEXT,
+                ratenanzahl TEXT,
+                kreditende TEXT,
+                sondertilgungen TEXT,
+                restwert TEXT,
+                fixzinsperiode TEXT,
+                sollzinssatz TEXT,
+                bearbeitungsgebuehr TEXT,
+                schaetzgebuehr TEXT,
+                kontofuehrungsgebuehr TEXT,
+                kreditpruefkosten TEXT,
+                vermittlerentgelt TEXT,
+                grundbucheintragungsgebuehr TEXT,
+                grundbuchseingabegebuehr TEXT,
+                grundbuchsauszug TEXT,
+                grundbuchsgesuch TEXT,
+                legalisierungsgebuehr TEXT,
+                gesamtkosten TEXT
+            )
+        """)
+        print(f"[INFO] Created loan_offers table in {DB_PATH}")
+    else:
+        print(f"[INFO] loan_offers table already exists in {DB_PATH}")
 
     conn.commit()
     conn.close()
-    print(f"[INFO] loan_offers table ensured in {DB_PATH}")
 
 
 @app.route('/api/offers', methods=['GET'])
@@ -71,7 +111,7 @@ def get_offers():
 
         cursor.execute("""
             SELECT id, anbieter, angebotsdatum, fixzinssatz, effektivzinssatz,
-                   laufzeit, fixzinssatz_in_jahren, fileName, created_at
+                   laufzeit, fixzinssatz_in_jahren, fileName, createdAt as created_at
             FROM loan_offers
             ORDER BY angebotsdatum DESC
         """)
@@ -148,17 +188,20 @@ def create_offer():
 
         cursor.execute("""
             INSERT INTO loan_offers (
-                anbieter, angebotsdatum, fixzinssatz, effektivzinssatz,
-                laufzeit, fixzinssatz_in_jahren, fileName
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                fileName, anbieter, angebotsdatum, fixzinssatz, effektivzinssatz,
+                laufzeit, fixzinssatz_in_jahren, rawJson, processingTime, confidence
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
+            data.get('fileName', 'manual_entry'),
             data.get('anbieter'),
             angebotsdatum,
             fixzinssatz,
             effektivzinssatz,
             laufzeit,
             fixzinssatz_in_jahren,
-            data.get('fileName', 'manual_entry')
+            '{}',  # rawJson - empty JSON for manual entries
+            0,     # processingTime - 0 for manual entries
+            1.0    # confidence - 1.0 for manual entries
         ))
 
         new_id = cursor.lastrowid
@@ -222,15 +265,16 @@ def health_check():
     })
 
 
+# Initialize database table on module load (for WSGI servers)
+ensure_loan_offers_table()
+
+
 if __name__ == '__main__':
     print(f"[INFO] Starting Offer API Server on {API_HOST}:{API_PORT}")
     print(f"[INFO] Database: {DB_PATH}")
     if not ALLOWED_ORIGIN:
         print("[WARN] OFFER_API_ALLOWED_ORIGIN not set - cross-origin requests are blocked. "
               "Same-origin requests via the reverse proxy still work.")
-
-    # Ensure table exists
-    ensure_loan_offers_table()
 
     # Run the server (loopback-only; expose it via a reverse proxy, see README)
     app.run(host=API_HOST, port=API_PORT, debug=False)

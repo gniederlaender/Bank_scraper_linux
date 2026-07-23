@@ -849,13 +849,14 @@ def generate_swap_rates_chart():
         }
         
         dates = []
-        for month_data in rate_data:
-            year = month_data['year']
-            month = month_data['month']
-            dt = datetime(year, month, 1)
-            dates.append(dt)
-            
-            rates = month_data.get('rates', {})
+        for day_data in rate_data:
+            # Use the 'date' field (ISO format: YYYY-MM-DD)
+            date_str = day_data.get('date')
+            if date_str:
+                dt = datetime.strptime(date_str, '%Y-%m-%d')
+                dates.append(dt)
+
+            rates = day_data.get('rates', {})
             for maturity in swap_data_by_maturity.keys():
                 if maturity in rates:
                     swap_data_by_maturity[maturity].append(rates[maturity])
@@ -919,18 +920,18 @@ def generate_swap_rates_chart():
             paper_bgcolor='white',
             font=dict(family='Segoe UI, Arial', size=12),
             legend=dict(
-                orientation="v",
-                yanchor="top",
-                y=1,
-                xanchor="left",
-                x=1.02,
+                orientation="h",
+                yanchor="bottom",
+                y=-0.3,
+                xanchor="center",
+                x=0.5,
                 bgcolor="rgba(255,255,255,0.8)",
                 bordercolor="rgba(0,0,0,0.2)",
                 borderwidth=1,
                 font=dict(size=10)
             ),
             height=500,
-            margin=dict(l=80, r=200, t=80, b=80)
+            margin=dict(l=60, r=40, t=80, b=120)
         )
         
         # Convert to HTML
@@ -988,14 +989,15 @@ def generate_euribor_chart():
         # Extract Euribor 3M data
         dates = []
         euribor_values = []
-        
-        for month_data in rate_data:
-            year = month_data['year']
-            month = month_data['month']
-            dt = datetime(year, month, 1)
-            dates.append(dt)
-            
-            rates = month_data.get('rates', {})
+
+        for day_data in rate_data:
+            # Use the 'date' field (ISO format: YYYY-MM-DD)
+            date_str = day_data.get('date')
+            if date_str:
+                dt = datetime.strptime(date_str, '%Y-%m-%d')
+                dates.append(dt)
+
+            rates = day_data.get('rates', {})
             if '3M' in rates:
                 euribor_values.append(rates['3M'])
             else:
@@ -1049,18 +1051,18 @@ def generate_euribor_chart():
             paper_bgcolor='white',
             font=dict(family='Segoe UI, Arial', size=12),
             legend=dict(
-                orientation="v",
-                yanchor="top",
-                y=1,
-                xanchor="left",
-                x=1.02,
+                orientation="h",
+                yanchor="bottom",
+                y=-0.3,
+                xanchor="center",
+                x=0.5,
                 bgcolor="rgba(255,255,255,0.8)",
                 bordercolor="rgba(0,0,0,0.2)",
                 borderwidth=1,
                 font=dict(size=10)
             ),
             height=500,
-            margin=dict(l=80, r=200, t=80, b=80)
+            margin=dict(l=60, r=40, t=80, b=120)
         )
         
         # Convert to HTML
@@ -1104,14 +1106,15 @@ def generate_static_png_swap_rates(rate_data):
         '20Y': [],
         '25Y': []
     }
-    
-    for month_data in rate_data:
-        year = month_data['year']
-        month = month_data['month']
-        dt = datetime(year, month, 1)
-        dates.append(dt)
-        
-        rates = month_data.get('rates', {})
+
+    for day_data in rate_data:
+        # Use the 'date' field (ISO format: YYYY-MM-DD)
+        date_str = day_data.get('date')
+        if date_str:
+            dt = datetime.strptime(date_str, '%Y-%m-%d')
+            dates.append(dt)
+
+        rates = day_data.get('rates', {})
         for maturity in swap_data_by_maturity.keys():
             if maturity in rates:
                 swap_data_by_maturity[maturity].append(rates[maturity])
@@ -1159,14 +1162,15 @@ def generate_static_png_euribor(rate_data):
     """Generate static PNG chart for Euribor 3M using matplotlib"""
     dates = []
     euribor_values = []
-    
-    for month_data in rate_data:
-        year = month_data['year']
-        month = month_data['month']
-        dt = datetime(year, month, 1)
-        dates.append(dt)
-        
-        rates = month_data.get('rates', {})
+
+    for day_data in rate_data:
+        # Use the 'date' field (ISO format: YYYY-MM-DD)
+        date_str = day_data.get('date')
+        if date_str:
+            dt = datetime.strptime(date_str, '%Y-%m-%d')
+            dates.append(dt)
+
+        rates = day_data.get('rates', {})
         if '3M' in rates:
             euribor_values.append(rates['3M'])
         else:
@@ -2212,8 +2216,9 @@ def generate_html():
                         statusSpan.textContent = '❌ Fehler: ' + result.message;
                     }}
                 }} catch (error) {{
+                    console.error('API Error:', error);
                     statusSpan.style.color = '#dc3545';
-                    statusSpan.textContent = '❌ Server nicht erreichbar. Bitte prüfen, ob der Offer-API-Dienst läuft.';
+                    statusSpan.textContent = '❌ Fehler: ' + error.message;
                 }}
 
                 submitBtn.disabled = false;
