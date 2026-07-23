@@ -31,6 +31,14 @@ HTML_PATH = BASE_DIR / os.getenv('CONSUMER_LOAN_HTML_PATH', 'bank_comparison_con
 HTML_EMAIL_PATH = BASE_DIR / os.getenv('CONSUMER_LOAN_EMAIL_HTML_PATH', 'bank_comparison_consumer_loan_email.html')
 CHART_PNG_PATH = BASE_DIR / os.getenv('CONSUMER_LOAN_CHART_PNG_PATH', 'consumer_loan_chart.png')
 
+# Shared design tokens for Plotly charts, kept in sync with the CSS custom
+# properties in generate_html()'s <style> block so charts and page chrome match
+# (same tokens as generate_housing_loan_html.py, for a consistent look across pages).
+PLOTLY_FONT = '-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif'
+COLOR_TEXT = '#1b2733'
+COLOR_TEXT_MUTED = '#5b6b78'
+COLOR_GRID = '#e2e8ee'
+
 
 def generate_interactive_chart():
     """
@@ -65,14 +73,14 @@ def generate_interactive_chart():
     # Convert timestamp to datetime
     df['date_scraped'] = pd.to_datetime(df['date_scraped'])
     
-    # Define colors for each bank
+    # Colors for each bank - modern, distinguishable palette
     colors = {
-        'raiffeisen': '#1f77b4',   # Blue
-        'bawag': '#ff7f0e',        # Orange
-        'bank99': '#2ca02c',       # Green
-        'erste': '#d62728',        # Red
-        'santander': '#9467bd',    # Purple
-        'bankaustria': '#e31937'   # Bank Austria / UniCredit Red
+        'raiffeisen': '#2563eb',   # Blue
+        'bawag': '#d97706',        # Amber
+        'bank99': '#059669',       # Emerald
+        'erste': '#dc2626',        # Red
+        'santander': '#7c3aed',    # Violet
+        'bankaustria': '#db2777'   # Pink
     }
     
     # Get unique banks
@@ -93,25 +101,25 @@ def generate_interactive_chart():
         data = data.sort_values('date_scraped')
         color = colors.get(bank, '#333333')
         
-        # Trace for Rate (solid line)
+        # Trace for Sollzins (solid line)
         fig.add_trace(go.Scatter(
             x=data['date_scraped'],
             y=data['rate_numeric'],
             mode='lines+markers',
-            name=f'{bank.capitalize()} - Rate',
-            line=dict(color=color, width=2.5, dash='solid'),
-            marker=dict(size=8, symbol='circle'),
+            name=f'{bank.capitalize()} - Sollzins',
+            line=dict(color=color, width=3, dash='solid'),
+            marker=dict(size=9, symbol='circle', line=dict(width=1, color='white')),
             legendgroup=f'bank_{bank}',
             hovertemplate=(
                 f'<b>{bank.capitalize()}</b><br>'
                 'Datum: %{x|%d.%m.%Y}<br>'
-                'Rate: %{y:.3f}%<br>'
+                'Sollzins: %{y:.3f}%<br>'
                 '<extra></extra>'
             ),
             visible=True,
             customdata=[['rate', bank]]
         ))
-        
+
         # Trace for Effektiver Zinssatz (dashed line)
         fig.add_trace(go.Scatter(
             x=data['date_scraped'],
@@ -119,7 +127,7 @@ def generate_interactive_chart():
             mode='lines+markers',
             name=f'{bank.capitalize()} - Eff. Zins',
             line=dict(color=color, width=2.5, dash='dash'),
-            marker=dict(size=8, symbol='square'),
+            marker=dict(size=8, symbol='square', line=dict(width=1, color='white')),
             legendgroup=f'bank_{bank}',
             hovertemplate=(
                 f'<b>{bank.capitalize()}</b><br>'
@@ -142,44 +150,41 @@ def generate_interactive_chart():
         else:
             trace_metadata.append({'type': None, 'bank': None})
     
-    # Update layout
+    # Update layout (title lives in the surrounding HTML card header)
     fig.update_layout(
-        title={
-            'text': '🏦 Konsumkredit Zinsentwicklung - Interaktive Analyse',
-            'x': 0.5,
-            'xanchor': 'center',
-            'font': {'size': 20, 'family': 'Segoe UI, Arial'}
-        },
         xaxis=dict(
-            title=dict(text='Datum', font=dict(size=14, family='Segoe UI, Arial')),
+            title=dict(text='Datum', font=dict(size=14, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
+            tickfont=dict(color=COLOR_TEXT_MUTED, size=12),
             showgrid=True,
             gridwidth=1,
-            gridcolor='rgba(200,200,200,0.3)',
+            gridcolor=COLOR_GRID,
             tickformat='%d.%m.%Y'
         ),
         yaxis=dict(
-            title=dict(text='Zinssatz (%)', font=dict(size=14, family='Segoe UI, Arial')),
+            title=dict(text='Sollzins (%)', font=dict(size=14, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
+            tickfont=dict(color=COLOR_TEXT_MUTED, size=12),
             showgrid=True,
             gridwidth=1,
-            gridcolor='rgba(200,200,200,0.3)'
+            gridcolor=COLOR_GRID
         ),
         hovermode='closest',
-        plot_bgcolor='rgba(250,250,250,0.9)',
-        paper_bgcolor='white',
-        font=dict(family='Segoe UI, Arial', size=12),
+        hoverlabel=dict(font=dict(family=PLOTLY_FONT, size=13), bgcolor='white', bordercolor=COLOR_GRID),
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(family=PLOTLY_FONT, size=13, color=COLOR_TEXT),
         legend=dict(
             orientation="v",
             yanchor="top",
             y=1,
             xanchor="left",
             x=1.02,
-            bgcolor="rgba(255,255,255,0.8)",
-            bordercolor="rgba(0,0,0,0.2)",
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor=COLOR_GRID,
             borderwidth=1,
-            font=dict(size=10)
+            font=dict(size=12)
         ),
         height=600,
-        margin=dict(l=80, r=280, t=80, b=80)
+        margin=dict(l=70, r=260, t=20, b=60)
     )
     
     # Convert to HTML
@@ -360,164 +365,224 @@ def generate_html():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bank Comparison - Consumer Loan Analysis (Interactive)</title>
     <style>
+        :root {{
+            --color-bg: #f2f5f7;
+            --color-surface: #ffffff;
+            --color-primary: #0f3b52;
+            --color-accent: #0a8a9a;
+            --color-accent-light: #e3f4f6;
+            --color-text: #1b2733;
+            --color-text-muted: #5b6b78;
+            --color-border: #e2e8ee;
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --shadow-sm: 0 1px 3px rgba(15, 59, 82, 0.08);
+            --shadow-md: 0 6px 20px rgba(15, 59, 82, 0.09);
+            --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }}
+        * {{
+            box-sizing: border-box;
+        }}
         body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: var(--font-sans);
             margin: 0;
-            padding: 20px;
-            background: linear-gradient(to bottom right, #f9fafb, #ffffff, #f3f4f6);
+            padding: clamp(10px, 3vw, 24px);
+            background: var(--color-bg);
+            color: var(--color-text);
             min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
         }}
         .container {{
-            max-width: 1600px;
+            max-width: 1440px;
             margin: 0 auto;
-            background-color: white;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            background-color: var(--color-surface);
+            padding: clamp(16px, 3vw, 36px);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-md);
         }}
         h1 {{
-            color: #2c3e50;
+            color: var(--color-primary);
             text-align: center;
-            margin-bottom: 10px;
-            font-size: 2.2em;
+            margin: 4px 0 6px;
+            font-size: clamp(1.3em, 4vw, 2.1em);
+            font-weight: 700;
+            letter-spacing: -0.01em;
+        }}
+        h2 {{
+            color: var(--color-primary);
+            font-weight: 700;
+            font-size: clamp(1.1em, 3vw, 1.6em);
         }}
         .subtitle {{
             text-align: center;
-            color: #7f8c8d;
-            margin-bottom: 30px;
-            font-size: 1.1em;
+            color: var(--color-text-muted);
+            margin-bottom: clamp(16px, 3vw, 28px);
+            font-size: clamp(0.85em, 2vw, 1.05em);
         }}
         .chart-container {{
-            margin-bottom: 40px;
-            padding: 25px;
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            margin-bottom: clamp(24px, 4vw, 40px);
+            padding: clamp(12px, 3vw, 24px);
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
         }}
-        .chart-controls {{
-            display: flex;
-            gap: 20px;
-            margin-bottom: 20px;
-            padding: 15px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            flex-wrap: wrap;
-            align-items: center;
-        }}
-        .control-group {{
+        .chart-title {{
+            font-size: clamp(1.05em, 2.4vw, 1.4em);
+            font-weight: 700;
+            color: var(--color-primary);
+            margin: 0 0 16px;
             display: flex;
             align-items: center;
             gap: 8px;
-            flex-wrap: wrap;
+        }}
+        details.filters-accordion {{
+            background: var(--color-accent-light);
+            border-radius: var(--radius-md);
+            margin-bottom: 18px;
+            border: 1px solid var(--color-border);
+            overflow: hidden;
+        }}
+        details.filters-accordion > summary {{
+            list-style: none;
+            cursor: pointer;
+            padding: 12px 18px;
+            font-weight: 700;
+            color: var(--color-primary);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 0.95em;
+        }}
+        details.filters-accordion > summary::-webkit-details-marker {{
+            display: none;
+        }}
+        details.filters-accordion > summary::after {{
+            content: '▾';
+            transition: transform 0.2s;
+            color: var(--color-accent);
+            font-size: 1.1em;
+        }}
+        details[open].filters-accordion > summary::after {{
+            transform: rotate(180deg);
+        }}
+        .accordion-body {{
+            padding: 0 18px 18px;
+        }}
+        .chart-controls {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 14px 20px;
+            align-items: end;
+            padding: 16px 18px;
+        }}
+        .control-group {{
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
         }}
         .control-label {{
-            font-weight: bold;
-            color: #2c3e50;
-            font-size: 14px;
+            font-weight: 600;
+            color: var(--color-primary);
+            font-size: 13px;
             white-space: nowrap;
         }}
-        button {{
-            padding: 10px 12px;
-            border: 2px solid #667eea;
-            border-radius: 6px;
-            font-size: 14px;
-            font-family: 'Segoe UI', Arial;
+        .segmented-control {{
+            display: inline-flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 999px;
+            padding: 4px;
+        }}
+        .segmented-control button {{
+            border: none;
+            background: transparent;
+            color: var(--color-text-muted);
+            padding: 8px 16px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 600;
+            font-family: var(--font-sans);
             cursor: pointer;
-            transition: all 0.3s;
-            min-height: 40px;
+            transition: all 0.2s;
+            min-height: 34px;
+            white-space: nowrap;
         }}
-        button.active {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+        .segmented-control button:hover {{
+            color: var(--color-primary);
         }}
-        button:hover {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        .segmented-control button.active {{
+            background: var(--color-primary);
             color: white;
         }}
         .table-container {{
             overflow-x: auto;
-            margin-bottom: 30px;
+            margin-bottom: 24px;
         }}
         table {{
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 20px;
-            font-size: 0.95em;
+            margin-bottom: 16px;
+            font-size: 0.9em;
         }}
         th {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--color-primary);
             color: white;
-            padding: 15px 12px;
+            padding: 12px 12px;
             text-align: left;
             font-weight: 600;
             position: sticky;
             top: 0;
         }}
         td {{
-            padding: 12px;
-            border-bottom: 1px solid #ecf0f1;
+            padding: 11px 12px;
+            border-bottom: 1px solid var(--color-border);
         }}
         tr:hover {{
-            background-color: #f8f9fa;
+            background-color: var(--color-accent-light);
         }}
         tr:nth-child(even) {{
-            background-color: #fafbfc;
+            background-color: #f8fafb;
         }}
         .bank-name {{
-            font-weight: bold;
-            color: #2c3e50;
-            background-color: #e8f4f8 !important;
+            font-weight: 700;
+            color: var(--color-primary);
+            background-color: var(--color-accent-light) !important;
+            border-left: 4px solid var(--color-accent);
         }}
         .timestamp {{
             text-align: center;
-            color: #7f8c8d;
-            font-size: 0.9em;
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 2px solid #ecf0f1;
+            color: var(--color-text-muted);
+            font-size: 0.85em;
+            margin-top: 28px;
+            padding-top: 18px;
+            border-top: 1px solid var(--color-border);
         }}
         @media (max-width: 768px) {{
             body {{
-                margin: 0;
-                padding: 5px;
+                padding: 8px;
             }}
             .container {{
-                margin: 0;
-                padding: 10px;
-                border-radius: 0;
-                box-shadow: none;
-            }}
-            h1 {{
-                font-size: 1.4em;
-                margin-bottom: 15px;
-            }}
-            .subtitle {{
-                font-size: 0.9em;
-                margin-bottom: 20px;
+                padding: 12px;
+                border-radius: var(--radius-md);
             }}
             .chart-container {{
-                padding: 15px;
-                margin-bottom: 20px;
+                padding: 12px;
+                margin-bottom: 18px;
             }}
             .chart-controls {{
-                flex-direction: column;
-                gap: 15px;
+                grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+                gap: 10px 12px;
                 padding: 12px;
             }}
-            .control-group {{
-                width: 100%;
-                justify-content: space-between;
-                gap: 10px;
-            }}
-            .control-label {{
-                font-size: 13px;
-            }}
-            button {{
-                padding: 8px 10px;
-                font-size: 13px;
-                min-height: 36px;
-                flex: 1;
+            .segmented-control button {{
+                padding: 7px 12px;
+                font-size: 12px;
+                min-height: 32px;
             }}
             /* Plotly chart mobile adjustments */
             #plotly-chart {{
@@ -530,110 +595,98 @@ def generate_html():
                 display: none !important;
             }}
             table {{
-                font-size: 11px;
-                min-width: 500px;
+                font-size: 13px;
+                min-width: 560px;
             }}
             th, td {{
-                padding: 8px 4px;
+                padding: 9px 8px;
                 white-space: nowrap;
             }}
             .table-container {{
-                margin-bottom: 20px;
+                margin-bottom: 18px;
             }}
             .timestamp {{
                 font-size: 0.8em;
-                margin-top: 20px;
-                padding-top: 15px;
+                margin-top: 18px;
+                padding-top: 14px;
             }}
         }}
         @media (max-width: 480px) {{
             body {{
-                padding: 2px;
+                padding: 6px;
             }}
             .container {{
-                padding: 5px;
-            }}
-            h1 {{
-                font-size: 1.2em;
-            }}
-            .chart-container {{
-                padding: 10px;
-            }}
-            .chart-controls {{
                 padding: 8px;
             }}
-            .control-group {{
-                flex-direction: column;
-                align-items: stretch;
-                gap: 8px;
+            .chart-container {{
+                padding: 8px;
             }}
-            .control-label {{
-                text-align: center;
+            .chart-controls {{
+                grid-template-columns: 1fr 1fr;
+                padding: 10px;
             }}
-            button {{
+            .segmented-control {{
                 width: 100%;
-                margin: 2px 0;
+                justify-content: stretch;
+            }}
+            .segmented-control button {{
+                flex: 1;
             }}
             #plotly-chart {{
                 height: 300px !important;
             }}
             table {{
-                font-size: 10px;
-                min-width: 450px;
+                font-size: 12px;
+                min-width: 520px;
             }}
             th, td {{
-                padding: 6px 2px;
+                padding: 8px 6px;
             }}
         }}
         .nav-tabs {{
             display: flex;
-            gap: 0;
-            margin-bottom: 30px;
-            border-bottom: 2px solid #ecf0f1;
-            background-color: #f8f9fa;
-            border-radius: 8px 8px 0 0;
-            overflow: hidden;
+            gap: 6px;
+            margin-bottom: 24px;
+            background-color: var(--color-bg);
+            border-radius: 999px;
+            padding: 5px;
         }}
         .nav-tab {{
             flex: 1;
-            padding: 15px 20px;
+            padding: 12px 18px;
             text-align: center;
-            background-color: #e8ecef;
-            color: #495057;
+            background-color: transparent;
+            color: var(--color-text-muted);
             text-decoration: none;
-            font-weight: 600;
-            font-size: 1.1em;
-            transition: all 0.3s ease;
+            font-weight: 700;
+            font-size: 0.95em;
+            transition: all 0.2s ease;
             border: none;
             cursor: pointer;
-            border-bottom: 3px solid transparent;
+            border-radius: 999px;
         }}
         .nav-tab:hover {{
-            background-color: #dee2e6;
-            color: #212529;
+            color: var(--color-primary);
             text-decoration: none;
         }}
         .nav-tab.active {{
-            background-color: white;
-            color: #667eea;
-            border-bottom: 3px solid #667eea;
-        }}
-        .nav-tab:first-child {{
-            border-right: 1px solid #dee2e6;
+            background-color: var(--color-primary);
+            color: white;
+            box-shadow: var(--shadow-sm);
         }}
         @media (max-width: 768px) {{
             .nav-tabs {{
-                margin-bottom: 20px;
+                margin-bottom: 18px;
             }}
             .nav-tab {{
-                padding: 12px 10px;
-                font-size: 0.95em;
+                padding: 10px 10px;
+                font-size: 0.85em;
             }}
         }}
         @media (max-width: 480px) {{
             .nav-tab {{
-                padding: 10px 8px;
-                font-size: 0.85em;
+                padding: 9px 6px;
+                font-size: 0.78em;
             }}
         }}
     </style>
@@ -646,17 +699,33 @@ def generate_html():
         </div>
         <h1>🏦 Consumer Loan Comparison</h1>
         <div class="subtitle">Konsumkredit - Interaktive Zinsentwicklung</div>
-        
+
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {{
+                document.querySelectorAll('details.filters-accordion').forEach(function(d) {{
+                    d.open = window.innerWidth > 768;
+                }});
+            }});
+        </script>
+
         <div class="chart-container">
-            <div class="chart-controls">
+            <div class="chart-title">🏦 Konsumkredit Zinsentwicklung</div>
+            <details class="filters-accordion">
+                <summary>🔧 Filter &amp; Anzeige</summary>
+                <div class="accordion-body">
+                <div class="chart-controls">
                 <div class="control-group">
                     <span class="control-label">Anzeigen:</span>
-                    <button id="btn-beide" onclick="setZinssatzFilter('beide')">Beide</button>
-                    <button id="btn-rate" onclick="setZinssatzFilter('rate')">Nur Zinssatz</button>
-                    <button id="btn-effektiver" class="active" onclick="setZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
+                    <div class="segmented-control">
+                        <button id="btn-beide" onclick="setZinssatzFilter('beide')">Beide</button>
+                        <button id="btn-rate" class="active" onclick="setZinssatzFilter('rate')">Nur Sollzins</button>
+                        <button id="btn-effektiver" onclick="setZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
+                    </div>
                 </div>
-            </div>
-            
+                </div>
+                </div>
+            </details>
+
             {chart_html}
             
             <script>
@@ -664,7 +733,7 @@ def generate_html():
                 const traceMetadata = {json.dumps(trace_metadata)};
                 
                 // Current filter state
-                let currentZinssatz = 'effektiver';
+                let currentZinssatz = 'rate';
                 
                 // Apply filters
                 function applyFilters() {{
@@ -735,9 +804,9 @@ def generate_html():
                 }}, 1500);
             </script>
         </div>
-        
+
         <div class="table-container">
-            <h2 style="color: #2c3e50; margin-bottom: 20px;">📋 Aktuelle Konditionen</h2>
+            <h2 style="margin-bottom: 20px;">📋 Aktuelle Konditionen</h2>
             <table>
                 <thead>
                     <tr>

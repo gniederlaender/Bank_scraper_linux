@@ -5,8 +5,10 @@ Generate HTML page with interactive Plotly charts for housing loan data from dur
 
 import sqlite3
 import os
+import re
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -51,6 +53,98 @@ COLOR_TEXT_MUTED = '#5b6b78'
 COLOR_GRID = '#e2e8ee'
 COLOR_ACCENT = '#0a8a9a'
 COLOR_PRIMARY = '#0f3b52'
+COLOR_TREND_UP = '#c0392b'    # rate increase - worse for borrowers
+COLOR_TREND_DOWN = '#1e8449'  # rate decrease - better for borrowers
+COLOR_TREND_FLAT = '#7f8c8d'
+
+# Modern, distinguishable per-Fixlaufzeit palette for the Durchblicker chart,
+# shared between the interactive Plotly version and the static email PNG.
+FIXIERUNG_COLORS = {
+    0: '#2563eb',   # Blue
+    5: '#059669',   # Emerald
+    10: '#d97706',  # Amber
+    15: '#dc2626',  # Red
+    20: '#7c3aed',  # Violet
+    25: '#0891b2',  # Cyan
+    30: '#db2777'   # Pink
+}
+
+
+def parse_percent_string(value: Optional[str]) -> Optional[float]:
+    """
+    Parse a German-formatted rate string like '3,490 % p.a.' into 3.49.
+    Returns None if value is missing or unparseable.
+    """
+    if not value:
+        return None
+    match = re.match(r'\s*(-?[\d.,]+)', value)
+    if not match:
+        return None
+    try:
+        return float(match.group(1).replace('.', '').replace(',', '.'))
+    except ValueError:
+        return None
+
+
+def compute_trend_rows(variations, previous_variations):
+    """
+    Build trend rows comparing each Fixlaufzeit's Sollzins between the
+    previous and current scraping run, for the trend table under the
+    Durchblicker chart.
+
+    Args:
+        variations: list of variation dicts for the current/latest run
+        previous_variations: list of variation dicts for the previous run
+            of the same Laufzeit, or None if there is no earlier run yet
+
+    Returns:
+        List of dicts sorted by fixierung_jahre:
+        {'fixierung_jahre', 'current_str', 'previous_str', 'trend'}
+        where trend is one of 'up', 'down', 'flat', 'na'.
+    """
+    previous_by_fixierung = {}
+    if previous_variations:
+        for v in previous_variations:
+            previous_by_fixierung[v['fixierung_jahre']] = v.get('zinssatz')
+
+    rows = []
+    for v in sorted(variations, key=lambda x: x['fixierung_jahre']):
+        fixierung = v['fixierung_jahre']
+        current_str = v.get('zinssatz')
+        previous_str = previous_by_fixierung.get(fixierung)
+
+        current_val = parse_percent_string(current_str)
+        previous_val = parse_percent_string(previous_str)
+
+        if current_val is None or previous_val is None:
+            trend = 'na'
+        elif abs(current_val - previous_val) < 0.005:
+            trend = 'flat'
+        elif current_val > previous_val:
+            trend = 'up'
+        else:
+            trend = 'down'
+
+        rows.append({
+            'fixierung_jahre': fixierung,
+            'current_str': current_str,
+            'previous_str': previous_str,
+            'trend': trend
+        })
+
+    return rows
+
+
+def trend_badge_html(trend: str) -> str:
+    """Render the arrow+color badge for one trend table row."""
+    if trend == 'up':
+        return f'<span style="color:{COLOR_TREND_UP}; font-weight:700;">▲ Anstieg</span>'
+    elif trend == 'down':
+        return f'<span style="color:{COLOR_TREND_DOWN}; font-weight:700;">▼ Rückgang</span>'
+    elif trend == 'flat':
+        return f'<span style="color:{COLOR_TREND_FLAT}; font-weight:700;">▬ Unverändert</span>'
+    else:
+        return f'<span style="color:{COLOR_TREND_FLAT};">–</span>'
 
 
 def get_bank_color(anbieter: str) -> str:
@@ -65,27 +159,27 @@ def get_bank_color(anbieter: str) -> str:
     - Others - any color from palette
     """
     anbieter_lower = anbieter.lower()
-    
-    # Specific bank colors
+
+    # Specific bank colors - modern, muted-saturated palette instead of pure RGB
     if 'bank austria' in anbieter_lower or 'unicredit' in anbieter_lower:
-        return '#FF0000'  # Red
+        return '#dc2626'  # Red
     elif 'volksbank' in anbieter_lower:
-        return '#0000FF'  # Blue
+        return '#2563eb'  # Blue
     elif 'raiffeisen' in anbieter_lower:
-        return '#FFFF00'  # Yellow
+        return '#eab308'  # Yellow/gold
     elif 'sparkasse' in anbieter_lower:
-        return '#87CEEB'  # Light Blue (Sky Blue) - for all Sparkasse banks
-    
+        return '#0ea5e9'  # Sky blue - for all Sparkasse banks
+
     # Default colors for other banks
     default_colors = [
-        '#FFA500',  # Orange
-        '#FF69B4',  # Hot Pink
-        '#32CD32',  # Lime Green
-        '#1E90FF',  # Dodger Blue
-        '#9370DB',  # Medium Purple
-        '#FF1493',  # Deep Pink
-        '#00CED1',  # Dark Turquoise
-        '#FFD700',  # Gold
+        '#f97316',  # Orange
+        '#ec4899',  # Pink
+        '#84cc16',  # Lime green
+        '#7c3aed',  # Violet
+        '#0d9488',  # Teal
+        '#f43f5e',  # Rose
+        '#6366f1',  # Indigo
+        '#ca8a04',  # Gold
     ]
     
     # Use hash of bank name to consistently assign colors
@@ -128,17 +222,9 @@ def generate_interactive_chart():
     # Convert timestamp to datetime
     df['scrape_timestamp'] = pd.to_datetime(df['scrape_timestamp'])
     
-    # Define colors for each Fixierung variation (years)
-    colors = {
-        0: '#1f77b4',   # Blue
-        5: '#2ca02c',   # Green
-        10: '#ff7f0e',  # Orange
-        15: '#d62728',  # Red
-        20: '#9467bd',  # Purple
-        25: '#8c564b',  # Brown
-        30: '#e377c2'   # Pink
-    }
-    
+    # Colors for each Fixierung variation (years)
+    colors = FIXIERUNG_COLORS
+
     # Get unique Fixierung and Laufzeit values
     fixierung_values = sorted(df['fixierung_jahre'].unique())
     laufzeit_values = sorted(df['run_laufzeit_jahre'].unique())
@@ -162,26 +248,26 @@ def generate_interactive_chart():
             data = data.sort_values('scrape_timestamp')
             color = colors.get(fixierung, '#333333')
             
-            # Trace for Zinssatz (solid line)
+            # Trace for Sollzins (solid line)
             fig.add_trace(go.Scatter(
                 x=data['scrape_timestamp'],
                 y=data['zinssatz_numeric'],
                 mode='lines+markers',
-                name=f'{fixierung}J fix - {laufzeit}J ZinsS',
-                line=dict(color=color, width=2.5, dash='solid'),
-                marker=dict(size=8, symbol='circle'),
+                name=f'{fixierung}J fix - {laufzeit}J SollZ',
+                line=dict(color=color, width=3, dash='solid'),
+                marker=dict(size=9, symbol='circle', line=dict(width=1, color='white')),
                 legendgroup=f'fixierung_{fixierung}_laufzeit_{laufzeit}',
                 hovertemplate=(
                     f'<b>Fixlaufzeit: {fixierung} Jahre</b><br>'
                     f'Laufzeit: {laufzeit} Jahre<br>'
                     'Datum: %{x|%d.%m.%Y}<br>'
-                    'Zinssatz: %{y:.3f}%<br>'
+                    'Sollzins: %{y:.3f}%<br>'
                     '<extra></extra>'
                 ),
                 visible=True,  # All visible by default
                 customdata=[[laufzeit, 'zinssatz', fixierung]] * len(data)
             ))
-            
+
             # Trace for Effektiver Zinssatz (dashed line)
             fig.add_trace(go.Scatter(
                 x=data['scrape_timestamp'],
@@ -189,7 +275,7 @@ def generate_interactive_chart():
                 mode='lines+markers',
                 name=f'{fixierung}J fix - {laufzeit}J EffZ',
                 line=dict(color=color, width=2.5, dash='dash'),
-                marker=dict(size=7, symbol='square'),
+                marker=dict(size=8, symbol='square', line=dict(width=1, color='white')),
                 legendgroup=f'fixierung_{fixierung}_laufzeit_{laufzeit}',
                 hovertemplate=(
                     f'<b>Fixlaufzeit: {fixierung} Jahre</b><br>'
@@ -219,24 +305,25 @@ def generate_interactive_chart():
     # title lives in the surrounding HTML card header, not inside the plot)
     fig.update_layout(
         xaxis=dict(
-            title=dict(text='Datum', font=dict(size=13, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
-            tickfont=dict(color=COLOR_TEXT_MUTED, size=11),
+            title=dict(text='Datum', font=dict(size=14, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
+            tickfont=dict(color=COLOR_TEXT_MUTED, size=12),
             showgrid=True,
             gridwidth=1,
             gridcolor=COLOR_GRID,
             tickformat='%d.%m.%Y'
         ),
         yaxis=dict(
-            title=dict(text='Zinssatz (%)', font=dict(size=13, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
-            tickfont=dict(color=COLOR_TEXT_MUTED, size=11),
+            title=dict(text='Sollzins (%)', font=dict(size=14, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
+            tickfont=dict(color=COLOR_TEXT_MUTED, size=12),
             showgrid=True,
             gridwidth=1,
             gridcolor=COLOR_GRID
         ),
         hovermode='closest',
+        hoverlabel=dict(font=dict(family=PLOTLY_FONT, size=13), bgcolor='white', bordercolor=COLOR_GRID),
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(family=PLOTLY_FONT, size=12, color=COLOR_TEXT),
+        font=dict(family=PLOTLY_FONT, size=13, color=COLOR_TEXT),
         legend=dict(
             orientation="v",
             yanchor="top",
@@ -246,7 +333,7 @@ def generate_interactive_chart():
             bgcolor="rgba(255,255,255,0.9)",
             bordercolor=COLOR_GRID,
             borderwidth=1,
-            font=dict(size=10)
+            font=dict(size=12)
         ),
         height=600,
         margin=dict(l=70, r=260, t=20, b=60)
@@ -350,10 +437,11 @@ def generate_individual_offers_chart():
             name=f'{anbieter} - Fixzins',
             line=dict(color=color, width=2),
             marker=dict(
-                size=14,
+                size=16,
                 symbol='star',
                 color=color,
-                line=dict(width=2, color='black')
+                opacity=0.9,
+                line=dict(width=1.5, color=COLOR_PRIMARY)
             ),
             legendgroup=anbieter,
             hovertemplate=(
@@ -377,10 +465,11 @@ def generate_individual_offers_chart():
             name=f'{anbieter} - Eff. Zins',
             line=dict(color=color, width=2, dash='dash'),
             marker=dict(
-                size=12,
+                size=13,
                 symbol='diamond',
                 color=color,
-                line=dict(width=2, color='black')
+                opacity=0.9,
+                line=dict(width=1.5, color=COLOR_PRIMARY)
             ),
             legendgroup=anbieter,
             hovertemplate=(
@@ -412,24 +501,25 @@ def generate_individual_offers_chart():
     # Update layout (title lives in the surrounding HTML card header)
     fig.update_layout(
         xaxis=dict(
-            title=dict(text='Datum', font=dict(size=13, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
-            tickfont=dict(color=COLOR_TEXT_MUTED, size=11),
+            title=dict(text='Datum', font=dict(size=14, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
+            tickfont=dict(color=COLOR_TEXT_MUTED, size=12),
             showgrid=True,
             gridwidth=1,
             gridcolor=COLOR_GRID,
             tickformat='%d.%m.%Y'
         ),
         yaxis=dict(
-            title=dict(text='Zinssatz (%)', font=dict(size=13, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
-            tickfont=dict(color=COLOR_TEXT_MUTED, size=11),
+            title=dict(text='Sollzins (%)', font=dict(size=14, family=PLOTLY_FONT, color=COLOR_TEXT_MUTED)),
+            tickfont=dict(color=COLOR_TEXT_MUTED, size=12),
             showgrid=True,
             gridwidth=1,
             gridcolor=COLOR_GRID
         ),
         hovermode='closest',
+        hoverlabel=dict(font=dict(family=PLOTLY_FONT, size=13), bgcolor='white', bordercolor=COLOR_GRID),
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(family=PLOTLY_FONT, size=12, color=COLOR_TEXT),
+        font=dict(family=PLOTLY_FONT, size=13, color=COLOR_TEXT),
         legend=dict(
             orientation="v",
             yanchor="top",
@@ -439,7 +529,7 @@ def generate_individual_offers_chart():
             bgcolor="rgba(255,255,255,0.9)",
             bordercolor=COLOR_GRID,
             borderwidth=1,
-            font=dict(size=10)
+            font=dict(size=12)
         ),
         height=600,
         margin=dict(l=70, r=260, t=20, b=60)
@@ -534,7 +624,7 @@ def generate_static_png_individual_offers(user_offers, bank_colors):
     plt.title(f'Wohnkredite - Konkurrenzangebote ({date_from} - {date_to})',
               fontsize=16, fontweight='bold', pad=15)
     plt.xlabel('Datum', fontsize=12, fontweight='bold')
-    plt.ylabel('Zinssatz (%)', fontsize=12, fontweight='bold')
+    plt.ylabel('Sollzins (%)', fontsize=12, fontweight='bold')
 
     # Format x-axis
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d.%m.%Y'))
@@ -626,7 +716,7 @@ def generate_static_png_chart(df, fixierung_values, laufzeit_values, colors):
     plt.title(f'Wohnkredit Zinsentwicklung - 25J Laufzeit ({date_from} - {date_to})',
               fontsize=16, fontweight='bold', pad=15)
     plt.xlabel('Datum', fontsize=12, fontweight='bold')
-    plt.ylabel('Zinssatz (%)', fontsize=12, fontweight='bold')
+    plt.ylabel('Sollzins (%)', fontsize=12, fontweight='bold')
     
     # Format x-axis
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d.%m.%Y'))
@@ -1393,10 +1483,9 @@ def generate_html():
         print("[WARN] No data found in database")
         return False, None
     
-    # Get latest run for initial table display
+    # Get latest run (used for the footer timestamp's Run ID)
     latest_run = runs[0]
-    latest_variations = all_variations[latest_run['id']]
-    
+
     # Organize runs by Laufzeit for dynamic table updates
     runs_by_laufzeit = {}
     for run in runs:
@@ -1408,20 +1497,45 @@ def generate_html():
             'variations': all_variations[run['id']]
         })
     
-    # Get the latest run for each Laufzeit
+    # Get the latest and previous run for each Laufzeit
     latest_by_laufzeit = {}
+    previous_by_laufzeit = {}
     for laufzeit, runs_list in runs_by_laufzeit.items():
-        # Sort by date descending and get the latest
+        # Sort by date descending and get the latest + previous run
         sorted_runs = sorted(runs_list, key=lambda x: x['run']['scrape_date'], reverse=True)
         latest_by_laufzeit[laufzeit] = sorted_runs[0]
-    
+        previous_by_laufzeit[laufzeit] = sorted_runs[1] if len(sorted_runs) > 1 else None
+
     # Prepare table data for JavaScript (must be JSON-serializable)
     table_data_for_js = {}
     for laufzeit, data in latest_by_laufzeit.items():
+        previous = previous_by_laufzeit.get(laufzeit)
         table_data_for_js[int(laufzeit)] = {
             'run': data['run'],
-            'variations': data['variations']
+            'variations': data['variations'],
+            'previous_variations': previous['variations'] if previous else None
         }
+
+    # Initial trend table state, matching the Laufzeit dropdown's default (25J)
+    default_trend_laufzeit = 25 if 25 in table_data_for_js else (
+        sorted(table_data_for_js.keys())[0] if table_data_for_js else None
+    )
+    initial_trend_rows = []
+    if default_trend_laufzeit is not None:
+        default_trend_data = table_data_for_js[default_trend_laufzeit]
+        initial_trend_rows = compute_trend_rows(
+            default_trend_data['variations'], default_trend_data['previous_variations']
+        )
+    initial_trend_tbody_html = ''.join(
+        f'''
+                        <tr>
+                            <td class="fixierung-cell">{row['fixierung_jahre']}J</td>
+                            <td>{row['previous_str'] or '–'}</td>
+                            <td>{row['current_str'] or '–'}</td>
+                            <td>{trend_badge_html(row['trend'])}</td>
+                        </tr>'''
+        for row in initial_trend_rows
+    )
     
     # Create HTML content
     html_content = f'''<!DOCTYPE html>
@@ -1628,37 +1742,6 @@ def generate_html():
             background: var(--color-primary);
             color: white;
         }}
-        .run-info {{
-            background: var(--color-accent-light);
-            padding: 14px 18px;
-            border-radius: var(--radius-sm);
-            margin-bottom: 24px;
-            border-left: 4px solid var(--color-accent);
-        }}
-        .run-info h3 {{
-            margin-top: 0;
-            margin-bottom: 8px;
-            color: var(--color-primary);
-            font-size: 0.95em;
-        }}
-        .run-info-text {{
-            color: var(--color-text-muted);
-            font-size: 0.8em;
-            line-height: 1.6;
-            margin: 0;
-        }}
-        .run-info-grid {{
-            display: none;
-        }}
-        .info-item {{
-            display: none;
-        }}
-        .info-label {{
-            display: none;
-        }}
-        .info-value {{
-            display: none;
-        }}
         .table-container {{
             overflow-x: auto;
             margin-bottom: 24px;
@@ -1722,16 +1805,6 @@ def generate_html():
                 font-size: 0.8em;
                 padding: 6px 12px;
                 margin: 3px;
-            }}
-            .run-info {{
-                padding: 12px 14px;
-                margin-bottom: 18px;
-            }}
-            .run-info-grid {{
-                display: none;
-            }}
-            .info-item {{
-                display: none;
             }}
             .chart-container {{
                 padding: 12px;
@@ -1898,8 +1971,8 @@ def generate_html():
                     <span class="control-label">Anzeigen:</span>
                     <div class="segmented-control">
                         <button id="btn-beide" onclick="setZinssatzFilter('beide')">Beide</button>
-                        <button id="btn-zinssatz" onclick="setZinssatzFilter('zinssatz')">Nur Zinssatz</button>
-                        <button id="btn-effektiver" class="active" onclick="setZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
+                        <button id="btn-zinssatz" class="active" onclick="setZinssatzFilter('zinssatz')">Nur Sollzins</button>
+                        <button id="btn-effektiver" onclick="setZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
                     </div>
                 </div>
                 </div>
@@ -1908,17 +1981,33 @@ def generate_html():
 
             {chart_html}
 
+            <div class="table-container" style="margin-top: 24px;">
+                <h2 id="trend-table-title" style="margin-bottom: 16px;">📊 Trend - Sollzins je Fixlaufzeit ({default_trend_laufzeit or '–'} Jahre Laufzeit)</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Fixlaufzeit</th>
+                            <th>Sollzins voriger Lauf</th>
+                            <th>Sollzins aktueller Lauf</th>
+                            <th>Trend</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trend-tbody">{initial_trend_tbody_html}
+                    </tbody>
+                </table>
+            </div>
+
             <script>
                 // Store trace metadata
                 const traceMetadata = {json.dumps(trace_metadata)};
-                
+
                 // Store table data for each Laufzeit
                 const tableData = {json.dumps(table_data_for_js)};
                 
                 // Current filter states
                 let currentLaufzeit = '25';
                 let currentFixierung = 'all';
-                let currentZinssatz = 'effektiver';
+                let currentZinssatz = 'zinssatz';
                 
                 // Apply combined filters (chart + tables)
                 function applyFilters() {{
@@ -1962,76 +2051,75 @@ def generate_html():
                     if (currentLaufzeit === 'all') {{
                         // Show latest overall run (could be any Laufzeit)
                         const latestLaufzeit = 25;
-                        renderTables(tableData[latestLaufzeit], latestLaufzeit, 'Aktuellste Berechnung (Alle Laufzeiten)');
+                        renderTables(tableData[latestLaufzeit], latestLaufzeit);
                     }} else {{
                         // Show latest run for selected Laufzeit
                         const laufzeit = parseInt(currentLaufzeit);
                         if (tableData[laufzeit]) {{
-                            renderTables(tableData[laufzeit], laufzeit, `Aktuelle Konditionen für ${{laufzeit}} Jahre Laufzeit`);
+                            renderTables(tableData[laufzeit], laufzeit);
                         }}
                     }}
                 }}
-                
-                // Render tables with given data
-                function renderTables(data, laufzeit, headerText) {{
+
+                // Parse a German-formatted rate string like '3,490 % p.a.' into 3.49
+                function parseSollzins(str) {{
+                    if (!str) return null;
+                    const m = str.match(/\\s*(-?[\\d.,]+)/);
+                    if (!m) return null;
+                    const num = parseFloat(m[1].replace(/\\./g, '').replace(',', '.'));
+                    return isNaN(num) ? null : num;
+                }}
+
+                function trendBadge(trend) {{
+                    if (trend === 'up') return '<span style="color:#c0392b; font-weight:700;">▲ Anstieg</span>';
+                    if (trend === 'down') return '<span style="color:#1e8449; font-weight:700;">▼ Rückgang</span>';
+                    if (trend === 'flat') return '<span style="color:#7f8c8d; font-weight:700;">▬ Unverändert</span>';
+                    return '<span style="color:#7f8c8d;">–</span>';
+                }}
+
+                // Render the trend table (previous vs. current Sollzins per Fixlaufzeit) and timestamp
+                function renderTables(data, laufzeit) {{
                     const run = data.run;
                     const variations = data.variations;
-                    
-                    // Update run info section
-                    document.querySelector('.run-info h3').textContent = '📊 Parameter für ' + laufzeit + ' Jahre Laufzeit';
-                    
-                    // Update Finanzierungsdetails table title
-                    const finanzTitle = document.querySelector('.table-container h2');
-                    if (finanzTitle) {{
-                        finanzTitle.textContent = '📋 Finanzierungsdetails - Aktuelle Konditionen für ' + laufzeit + ' Jahre Laufzeit';
+                    const previousVariations = data.previous_variations || [];
+
+                    const titleEl = document.getElementById('trend-table-title');
+                    if (titleEl) {{
+                        titleEl.textContent = '📊 Trend - Sollzins je Fixlaufzeit (' + laufzeit + ' Jahre Laufzeit)';
                     }}
-                    
-                    // Update run info text paragraph
-                    const runInfoText = document.getElementById('run-info-text');
-                    if (runInfoText) {{
-                        runInfoText.textContent = 
-                            'Kreditbetrag: €' + run.kreditbetrag.toLocaleString('de-DE') + 
-                            ', Laufzeit: ' + run.laufzeit_jahre + ' Jahre' +
-                            ', Kaufpreis: €' + run.kaufpreis.toLocaleString('de-DE') +
-                            ', Kaufnebenkosten: €' + run.kaufnebenkosten.toLocaleString('de-DE') +
-                            ', Eigenmittel: €' + run.eigenmittel.toLocaleString('de-DE') +
-                            ', Haushalt Alter: ' + run.haushalt_alter + ' Jahre' +
-                            ', Netto-Einkommen: €' + run.haushalt_einkommen.toFixed(2) + '/Monat' +
-                            ', Wohnnutzfläche: ' + run.haushalt_nutzflaeche + ' m²';
-                    }}
-                    
-                    // Build Finanzierungsdetails table
-                    let finanzTable = '';
-                    variations.forEach(v => {{
-                        if (v.rate) {{
-                            const anschluss = v.anschlusskondition ? 
-                                `<br><small style='color: #7f8c8d;'>Anschluss: ${{v.anschlusskondition}}</small>` : '';
-                            finanzTable += `
-                                <tr>
-                                    <td class="fixierung-cell">${{v.fixierung_jahre}}J</td>
-                                    <td class="rate-cell">€${{v.rate.toLocaleString('de-DE', {{minimumFractionDigits: 2, maximumFractionDigits: 2}})}}</td>
-                                    <td>${{v.zinssatz}}${{anschluss}}</td>
-                                    <td>${{v.effektiver_zinssatz}}</td>
-                                    <td>${{v.laufzeit}}</td>
-                                    <td>€${{v.kreditbetrag.toLocaleString('de-DE', {{minimumFractionDigits: 2, maximumFractionDigits: 2}})}}</td>
-                                    <td>€${{v.gesamtbetrag.toLocaleString('de-DE', {{minimumFractionDigits: 2, maximumFractionDigits: 2}})}}</td>
-                                    <td>€${{v.einberechnete_kosten.toLocaleString('de-DE', {{minimumFractionDigits: 2, maximumFractionDigits: 2}})}}</td>
-                                </tr>`;
-                        }} else {{
-                            finanzTable += `
-                                <tr>
-                                    <td class="fixierung-cell">${{v.fixierung_jahre}}J</td>
-                                    <td colspan="7" style="text-align: center; color: #95a5a6;">Keine Daten verfügbar</td>
-                                </tr>`;
+
+                    const previousByFixierung = {{}};
+                    previousVariations.forEach(v => {{ previousByFixierung[v.fixierung_jahre] = v.zinssatz; }});
+
+                    const sortedVariations = [...variations].sort((a, b) => a.fixierung_jahre - b.fixierung_jahre);
+                    let trendTable = '';
+                    sortedVariations.forEach(v => {{
+                        const currentStr = v.zinssatz;
+                        const previousStr = previousByFixierung[v.fixierung_jahre];
+                        const currentVal = parseSollzins(currentStr);
+                        const previousVal = parseSollzins(previousStr);
+
+                        let trend = 'na';
+                        if (currentVal !== null && previousVal !== null) {{
+                            if (Math.abs(currentVal - previousVal) < 0.005) trend = 'flat';
+                            else if (currentVal > previousVal) trend = 'up';
+                            else trend = 'down';
                         }}
+
+                        trendTable += `
+                                <tr>
+                                    <td class="fixierung-cell">${{v.fixierung_jahre}}J</td>
+                                    <td>${{previousStr || '–'}}</td>
+                                    <td>${{currentStr || '–'}}</td>
+                                    <td>${{trendBadge(trend)}}</td>
+                                </tr>`;
                     }});
-                    document.querySelector('#finanz-tbody').innerHTML = finanzTable;
-                    
-                    
+                    document.querySelector('#trend-tbody').innerHTML = trendTable;
+
                     // Update timestamp with run ID
                     const timestampDiv = document.querySelector('.timestamp');
                     const currentTime = timestampDiv.innerHTML.split('<br>')[0];
-                    timestampDiv.innerHTML = currentTime + '<br>Data Source: Housing Loan Database | Run ID: ' + run.id + 
+                    timestampDiv.innerHTML = currentTime + '<br>Data Source: Housing Loan Database | Run ID: ' + run.id +
                         '';
                 }}
                 
@@ -2125,8 +2213,8 @@ def generate_html():
                     <span class="control-label">Anzeigen:</span>
                     <div class="segmented-control">
                         <button id="individual-btn-beide" onclick="setIndividualZinssatzFilter('beide')">Beide</button>
-                        <button id="individual-btn-zinssatz" onclick="setIndividualZinssatzFilter('zinssatz')">Nur Zinssatz</button>
-                        <button id="individual-btn-effektiver" class="active" onclick="setIndividualZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
+                        <button id="individual-btn-zinssatz" class="active" onclick="setIndividualZinssatzFilter('zinssatz')">Nur Sollzins</button>
+                        <button id="individual-btn-effektiver" onclick="setIndividualZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
                     </div>
                 </div>
                 </div>
@@ -2142,7 +2230,7 @@ def generate_html():
                 // Current filter states for individual offers chart
                 let individualCurrentLaufzeit = 'all';
                 let individualCurrentFixierung = 'all';
-                let individualCurrentZinssatz = 'effektiver';
+                let individualCurrentZinssatz = 'zinssatz';
                 
                 // Apply filters for individual offers chart
                 function applyIndividualFilters() {{
@@ -2353,72 +2441,18 @@ def generate_html():
             document.getElementById('angebotsdatum').valueAsDate = new Date();
         </script>
 
-        <div class="table-container">
-            <h2 style="color: #2c3e50; margin-bottom: 20px;">📋 Finanzierungsdetails - Aktuelle Konditionen für 25 Jahre Laufzeit</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Fixlaufzeit</th>
-                        <th>Monatliche Rate</th>
-                        <th>Zinssatz</th>
-                        <th>Effektiver Zinssatz</th>
-                        <th>Laufzeit</th>
-                        <th>Kreditbetrag</th>
-                        <th>Gesamtbetrag</th>
-                        <th>Einberechnete Kosten</th>
-                    </tr>
-                </thead>
-                <tbody id="finanz-tbody">
 '''
-    
-    # Add table rows for latest variations
-    for var in latest_variations:
-        if var['rate']:
-            anschluss_note = f"<br><small style='color: #7f8c8d;'>Anschluss: {var['anschlusskondition']}</small>" if var['anschlusskondition'] else ""
-            
-            html_content += f'''
-                    <tr>
-                        <td class="fixierung-cell">{var['fixierung_jahre']}J</td>
-                        <td class="rate-cell">€{var['rate']:,.2f}</td>
-                        <td>{var['zinssatz']}{anschluss_note}</td>
-                        <td>{var['effektiver_zinssatz']}</td>
-                        <td>{var['laufzeit']}</td>
-                        <td>€{var['kreditbetrag']:,.2f}</td>
-                        <td>€{var['gesamtbetrag']:,.2f}</td>
-                        <td>{var['besicherung']}</td>
-                    </tr>
-'''
-        else:
-            html_content += f'''
-                    <tr>
-                        <td class="fixierung-cell">{var['fixierung_jahre']}J</td>
-                        <td colspan="7" style="text-align: center; color: #95a5a6;">Keine Daten verfügbar</td>
-                    </tr>
-'''
-    
-    html_content += f'''
-                </tbody>
-            </table>
-        </div>
-        
-        <div class="run-info">
-            <h3>📊 Parameter für 25 Jahre Laufzeit</h3>
-            <p class="run-info-text" id="run-info-text">Kreditbetrag: €{latest_run['kreditbetrag']:,.0f}, Laufzeit: {latest_run['laufzeit_jahre']} Jahre, Kaufpreis: €{latest_run['kaufpreis']:,.0f}, Kaufnebenkosten: €{latest_run['kaufnebenkosten']:,.0f}, Eigenmittel: €{latest_run['eigenmittel']:,.0f}, Haushalt Alter: {latest_run['haushalt_alter']} Jahre, Netto-Einkommen: €{latest_run['haushalt_einkommen']:,.2f}/Monat, Wohnnutzfläche: {latest_run['haushalt_nutzflaeche']} m²</p>
-        </div>
-        
-'''
-    
-    # Add OeNB section if screenshots are available
-    oenb_section_html = generate_oenb_section_html(oenb_screenshots)
-    html_content += oenb_section_html
-    
-    # Add SWAP/Euribor section if charts are available
+
+    # Add SWAP/Euribor section first (Marktzinsen above OeNB), then OeNB
     swap_euribor_section_html = generate_swap_euribor_section_html(
         swap_chart_html, euribor_chart_html, swap_png_base64, euribor_png_base64,
         for_email=False, swap_maturities=swap_maturities
     )
     html_content += swap_euribor_section_html
-    
+
+    oenb_section_html = generate_oenb_section_html(oenb_screenshots)
+    html_content += oenb_section_html
+
     html_content += f'''
         <div class="timestamp">
             Last Updated: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}<br>
@@ -2877,7 +2911,7 @@ def generate_email_html(png_base64, individual_png_base64=None):
                     <tr>
                         <th>Fixlaufzeit</th>
                         <th>Monatliche Rate</th>
-                        <th>Zinssatz</th>
+                        <th>Sollzins</th>
                         <th>Effektiver Zinssatz</th>
                         <th>Laufzeit</th>
                         <th>Kreditbetrag</th>
