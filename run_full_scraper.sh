@@ -3,10 +3,37 @@
 # Complete workflow for Durchblicker.at Loan Scrapers
 # This script runs scrapers for both housing loans (Wohnkredit) and consumer loans (Konsumkredit)
 #
+# Flags:
+#   --noscraping  Skip the housing loan and consumer loan scraping steps
+#                 (view/report generation still runs against existing DB data)
+#   --noemail     Skip sending the housing loan and consumer loan email reports
+#
+
+NOSCRAPING=false
+NOEMAIL=false
+for arg in "$@"; do
+    case "$arg" in
+        --noscraping)
+            NOSCRAPING=true
+            ;;
+        --noemail)
+            NOEMAIL=true
+            ;;
+        *)
+            echo "⚠️  Unknown argument: $arg"
+            ;;
+    esac
+done
 
 echo "============================================================"
 echo "Austrian Bank Scraper - Full Workflow"
 echo "Housing Loans + Consumer Loans"
+if [ "$NOSCRAPING" = true ]; then
+    echo "Flag: --noscraping (scraping steps will be skipped)"
+fi
+if [ "$NOEMAIL" = true ]; then
+    echo "Flag: --noemail (email reports will not be sent)"
+fi
 echo "============================================================"
 echo ""
 
@@ -25,17 +52,22 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # Step 1: Run the housing loan scraper
-echo "Step 1: Running Durchblicker.at housing loan scraper..."
-python3 test_durchblicker.py
-SCRAPER_EXIT=$?
+if [ "$NOSCRAPING" = true ]; then
+    echo "Step 1: Skipping Durchblicker.at housing loan scraper (--noscraping)"
+    echo ""
+else
+    echo "Step 1: Running Durchblicker.at housing loan scraper..."
+    python3 test_durchblicker.py
+    SCRAPER_EXIT=$?
 
-if [ $SCRAPER_EXIT -ne 0 ]; then
-    echo "❌ Housing loan scraper failed with exit code: $SCRAPER_EXIT"
-    exit 1
+    if [ $SCRAPER_EXIT -ne 0 ]; then
+        echo "❌ Housing loan scraper failed with exit code: $SCRAPER_EXIT"
+        exit 1
+    fi
+
+    echo "✅ Housing loan scraper completed successfully!"
+    echo ""
 fi
-
-echo "✅ Housing loan scraper completed successfully!"
-echo ""
 
 # Step 2: Create/update the housing loan database view
 echo "Step 2: Creating/updating housing loan database view..."
@@ -151,15 +183,19 @@ fi
 echo ""
 
 # Step 6: Send housing loan email report
-echo "Step 6: Sending housing loan email report ($HOUSING_EMAIL_FILE)..."
-python3 send_email_report.py "$HOUSING_EMAIL_FILE" --type wohnkredit
-EMAIL_EXIT=$?
-
-if [ $EMAIL_EXIT -ne 0 ]; then
-    echo "⚠️  Failed to send housing loan email report (exit code: $EMAIL_EXIT)"
-    echo "   Check email configuration in .env file"
+if [ "$NOEMAIL" = true ]; then
+    echo "Step 6: Skipping housing loan email report (--noemail)"
 else
-    echo "✅ Housing loan email report sent successfully!"
+    echo "Step 6: Sending housing loan email report ($HOUSING_EMAIL_FILE)..."
+    python3 send_email_report.py "$HOUSING_EMAIL_FILE" --type wohnkredit
+    EMAIL_EXIT=$?
+
+    if [ $EMAIL_EXIT -ne 0 ]; then
+        echo "⚠️  Failed to send housing loan email report (exit code: $EMAIL_EXIT)"
+        echo "   Check email configuration in .env file"
+    else
+        echo "✅ Housing loan email report sent successfully!"
+    fi
 fi
 
 echo ""
@@ -178,17 +214,22 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # Step 1: Run the consumer loan scraper
-echo "Step 1: Running consumer loan scraper..."
-python3 austrian_bankscraper_linux.py
-CONSUMER_SCRAPER_EXIT=$?
+if [ "$NOSCRAPING" = true ]; then
+    echo "Step 1: Skipping consumer loan scraper (--noscraping)"
+    echo ""
+else
+    echo "Step 1: Running consumer loan scraper..."
+    python3 austrian_bankscraper_linux.py
+    CONSUMER_SCRAPER_EXIT=$?
 
-if [ $CONSUMER_SCRAPER_EXIT -ne 0 ]; then
-    echo "❌ Consumer loan scraper failed with exit code: $CONSUMER_SCRAPER_EXIT"
-    exit 1
+    if [ $CONSUMER_SCRAPER_EXIT -ne 0 ]; then
+        echo "❌ Consumer loan scraper failed with exit code: $CONSUMER_SCRAPER_EXIT"
+        exit 1
+    fi
+
+    echo "✅ Consumer loan scraper completed successfully!"
+    echo ""
 fi
-
-echo "✅ Consumer loan scraper completed successfully!"
-echo ""
 
 # Step 2: Create/update the consumer loan database view
 echo "Step 2: Creating/updating consumer loan database view..."
@@ -247,15 +288,19 @@ fi
 echo ""
 
 # Step 5: Send consumer loan email report
-echo "Step 5: Sending consumer loan email report ($CONSUMER_EMAIL_FILE)..."
-python3 send_email_report.py "$CONSUMER_EMAIL_FILE" --type konsumkredit
-CONSUMER_EMAIL_EXIT=$?
-
-if [ $CONSUMER_EMAIL_EXIT -ne 0 ]; then
-    echo "⚠️  Failed to send consumer loan email report (exit code: $CONSUMER_EMAIL_EXIT)"
-    echo "   Check email configuration in .env file"
+if [ "$NOEMAIL" = true ]; then
+    echo "Step 5: Skipping consumer loan email report (--noemail)"
 else
-    echo "✅ Consumer loan email report sent successfully!"
+    echo "Step 5: Sending consumer loan email report ($CONSUMER_EMAIL_FILE)..."
+    python3 send_email_report.py "$CONSUMER_EMAIL_FILE" --type konsumkredit
+    CONSUMER_EMAIL_EXIT=$?
+
+    if [ $CONSUMER_EMAIL_EXIT -ne 0 ]; then
+        echo "⚠️  Failed to send consumer loan email report (exit code: $CONSUMER_EMAIL_EXIT)"
+        echo "   Check email configuration in .env file"
+    else
+        echo "✅ Consumer loan email report sent successfully!"
+    fi
 fi
 
 echo ""
@@ -283,6 +328,10 @@ echo "  📄 HTML: /opt/Bankcomparison/bank_comparison_consumer_loan.html"
 echo "  🌐 Web:  http://smartprototypes.net/Bank_market_overview/bank_comparison_consumer_loan.html"
 echo "  🗄️  Database: /opt/Bankcomparison/austrian_banks.db"
 echo ""
-echo "📧 Emails: Sent to configured recipients"
+if [ "$NOEMAIL" = true ]; then
+    echo "📧 Emails: Skipped (--noemail)"
+else
+    echo "📧 Emails: Sent to configured recipients"
+fi
 echo ""
 
