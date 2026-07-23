@@ -6,7 +6,7 @@ Generate HTML page with interactive Plotly charts for housing loan data from dur
 import sqlite3
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 import pandas as pd
@@ -432,6 +432,79 @@ def generate_interactive_chart():
     return chart_html, laufzeit_values, fixierung_values, trace_metadata, png_base64
 
 
+def compute_lowest_offers_last_30_days(user_offers, days: int = 30):
+    """
+    For each bank that submitted at least one competitor offer within the
+    last `days` days, find its lowest Fixzins (Sollzins) offer in that
+    window, along with the Fixlaufzeit and date it was quoted at.
+
+    Returns a list of dicts sorted by rate ascending (best offer first):
+    {'anbieter', 'fixzinssatz', 'fixzinssatz_in_jahren_display', 'angebotsdatum'}
+    """
+    cutoff = datetime.now() - timedelta(days=days)
+    recent = [
+        o for o in user_offers
+        if o.get('angebotsdatum') and o['angebotsdatum'] >= cutoff and o.get('fixzinssatz') is not None
+    ]
+
+    best_by_bank = {}
+    for offer in recent:
+        anbieter = offer['anbieter']
+        current_best = best_by_bank.get(anbieter)
+        if current_best is None or offer['fixzinssatz'] < current_best['fixzinssatz']:
+            best_by_bank[anbieter] = offer
+
+    rows = [
+        {
+            'anbieter': anbieter,
+            'fixzinssatz': offer['fixzinssatz'],
+            'fixzinssatz_in_jahren_display': offer.get('fixzinssatz_in_jahren_display') or 'n/a',
+            'angebotsdatum': offer['angebotsdatum'],
+        }
+        for anbieter, offer in best_by_bank.items()
+    ]
+    rows.sort(key=lambda r: r['fixzinssatz'])
+    return rows
+
+
+def generate_lowest_offers_table_html(user_offers, days: int = 30) -> str:
+    """Render the 'lowest Sollzins per bank in the last N days' table HTML."""
+    rows = compute_lowest_offers_last_30_days(user_offers, days=days)
+    if not rows:
+        return (
+            f'<p style="text-align: center; color: var(--color-text-muted); padding: 20px;">'
+            f'Keine Konkurrenzangebote in den letzten {days} Tagen</p>'
+        )
+
+    body_rows = ''.join(
+        f'''
+                        <tr>
+                            <td class="fixierung-cell">{row['anbieter']}</td>
+                            <td class="rate-cell">{format_percent_short(row['fixzinssatz'])}</td>
+                            <td>{row['fixzinssatz_in_jahren_display']}</td>
+                            <td>{row['angebotsdatum'].strftime('%d.%m.%Y')}</td>
+                        </tr>'''
+        for row in rows
+    )
+
+    return f'''
+            <div class="table-container" style="margin-top: 24px;">
+                <h2 style="margin-bottom: 16px;">🏆 Niedrigster Sollzins je Bank (letzte {days} Tage)</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Bank</th>
+                            <th>Niedrigster Sollzins</th>
+                            <th>Fixlaufzeit</th>
+                            <th>Datum</th>
+                        </tr>
+                    </thead>
+                    <tbody>{body_rows}
+                    </tbody>
+                </table>
+            </div>'''
+
+
 def generate_individual_offers_chart():
     """
     Generate interactive Plotly chart with ONLY individual loan offers.
@@ -474,85 +547,79 @@ def generate_individual_offers_chart():
     # Create figure
     fig = go.Figure()
 
-    # Group offers by (bank, Fixlaufzeit, Laufzeit) so offers for the same
-    # bank/product combo connect into one trend line instead of a cloud of
-    # disconnected points - a single offer per bank per date was unreadable
-    # once there were more than a handful of competitor entries. Traces stay
-    # homogeneous in laufzeit/fixierung/anbieter so the existing trace-level
-    # filter logic (customdata[0]) still works unchanged.
+    # Group offers by bank for consistent coloring
     bank_colors = {}
-    groups = {}
+
+    # Add traces for each offer - one point per offer, no connecting lines.
+    # (A per-bank connected-line version was tried and reverted: it read as
+    # a trend chart when the actual ask is "what did each bank quote, when,
+    # at what Fixlaufzeit" - the last-30-days table below covers that.)
     for offer in user_offers:
         anbieter = offer['anbieter']
+        date = offer['angebotsdatum']
+        laufzeit_numeric = offer.get('laufzeit_numeric')
+        fixzins_years = offer.get('fixzinssatz_in_jahren_numeric')
+        fixzins_display = offer.get('fixzinssatz_in_jahren_display') or "n/a"
+
+        # Get or assign color for this bank
         if anbieter not in bank_colors:
             bank_colors[anbieter] = get_bank_color(anbieter)
-        key = (anbieter, offer.get('fixzinssatz_in_jahren_numeric'), offer.get('laufzeit_numeric'))
-        groups.setdefault(key, []).append(offer)
-
-    for (anbieter, fixzins_years, laufzeit_numeric), offers in groups.items():
-        offers_sorted = sorted(offers, key=lambda o: o['angebotsdatum'])
         color = bank_colors[anbieter]
-        fixzins_display = offers_sorted[-1].get('fixzinssatz_in_jahren_display') or "n/a"
-        laufzeit_display = offers_sorted[-1].get('laufzeit', 'N/A')
-        label_suffix = f' ({fixzins_display} fix)' if fixzins_display != 'n/a' else ''
 
-        dates = [o['angebotsdatum'] for o in offers_sorted]
-        fixzins_vals = [o['fixzinssatz'] for o in offers_sorted]
-        eff_vals = [o['effektivzinssatz'] for o in offers_sorted]
-        legendgroup = f'{anbieter}_{fixzins_years}_{laufzeit_numeric}'
-
-        # Trace for Fixzins (solid line - single offers render as a lone marker)
+        # Trace for Fixzins (star marker)
         fig.add_trace(go.Scatter(
-            x=dates,
-            y=fixzins_vals,
-            mode='lines+markers',
-            name=f'{anbieter} - Fixzins{label_suffix}',
-            line=dict(color=color, width=2.5),
+            x=[date],
+            y=[offer['fixzinssatz']],
+            mode='markers',
+            name=f'{anbieter} - Fixzins',
+            line=dict(color=color, width=2),
             marker=dict(
-                size=11,
+                size=16,
                 symbol='star',
                 color=color,
                 opacity=0.9,
                 line=dict(width=1.5, color=COLOR_PRIMARY)
             ),
-            legendgroup=legendgroup,
+            legendgroup=anbieter,
             hovertemplate=(
                 f'<b>{anbieter}</b><br>'
                 'Datum: %{x|%d.%m.%Y}<br>'
-                'Fixzins: %{y:.3f}%<br>'
-                f'Laufzeit: {laufzeit_display}<br>'
+                f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
+                f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
+                f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
                 f'Fixzinsperiode: {fixzins_display}<br>'
                 '<extra></extra>'
             ),
             visible=True,  # Visible by default
-            customdata=[[laufzeit_numeric, 'user_offer_fix', fixzins_years, anbieter]] * len(dates)
+            customdata=[[laufzeit_numeric, 'user_offer_fix', fixzins_years, anbieter]]
         ))
 
-        # Trace for Effektivzinssatz (dashed line)
+        # Trace for Effektivzinssatz (diamond marker)
         fig.add_trace(go.Scatter(
-            x=dates,
-            y=eff_vals,
-            mode='lines+markers',
-            name=f'{anbieter} - Eff. Zins{label_suffix}',
+            x=[date],
+            y=[offer['effektivzinssatz']],
+            mode='markers',
+            name=f'{anbieter} - Eff. Zins',
             line=dict(color=color, width=2, dash='dash'),
             marker=dict(
-                size=9,
+                size=13,
                 symbol='diamond',
                 color=color,
                 opacity=0.9,
                 line=dict(width=1.5, color=COLOR_PRIMARY)
             ),
-            legendgroup=legendgroup,
+            legendgroup=anbieter,
             hovertemplate=(
                 f'<b>{anbieter}</b><br>'
                 'Datum: %{x|%d.%m.%Y}<br>'
-                'Eff. Zins: %{y:.3f}%<br>'
-                f'Laufzeit: {laufzeit_display}<br>'
+                f'Fixzins: {offer["fixzinssatz"]:.3f}%<br>'
+                f'Eff. Zins: {offer["effektivzinssatz"]:.3f}%<br>'
+                f'Laufzeit: {offer.get("laufzeit", "N/A")}<br>'
                 f'Fixzinsperiode: {fixzins_display}<br>'
                 '<extra></extra>'
             ),
             visible=True,  # Visible by default
-            customdata=[[laufzeit_numeric, 'user_offer_eff', fixzins_years, anbieter]] * len(dates)
+            customdata=[[laufzeit_numeric, 'user_offer_eff', fixzins_years, anbieter]]
         ))
                 
     # Store trace metadata for JavaScript filtering
@@ -675,19 +742,17 @@ def generate_static_png_individual_offers(user_offers, bank_colors):
         sorted_dates, sorted_values = zip(*sorted_data) if sorted_data else ([], [])
         
         if sorted_dates:
-            # Connect same-bank offers chronologically so trends are visible
-            # at a glance instead of a cloud of disconnected markers
-            plt.plot(
+            # Use scatter for marker-only visualization (no connecting lines)
+            plt.scatter(
                 sorted_dates,
                 sorted_values,
                 marker='d',
-                markersize=9,
-                linewidth=2,
+                s=100,  # Marker size
                 color=color,
                 label=anbieter,
-                alpha=0.85,
-                markeredgecolor=COLOR_PRIMARY,
-                markeredgewidth=1.2
+                alpha=0.8,
+                edgecolors=COLOR_PRIMARY,
+                linewidths=1.5
             )
     
     # Customize plot with date range in title
@@ -1529,7 +1594,15 @@ def generate_html():
         individual_fixierung_values = []
         individual_trace_metadata = []
         individual_png_base64 = None
-    
+
+    # Lowest Sollzins per bank in the last 30 days, for the table under the
+    # Konkurrenzangebote chart
+    try:
+        lowest_offers_table_html = generate_lowest_offers_table_html(get_all_loan_offers(), days=30)
+    except Exception as e:
+        print(f"[WARN] Could not build lowest-offers table: {e}")
+        lowest_offers_table_html = ''
+
     # Get all runs data
     runs, all_variations = get_all_runs_data()
     
@@ -2435,6 +2508,7 @@ def generate_html():
                     applyIndividualFilters();
                 }}, 1500);
             </script>
+{lowest_offers_table_html}
         </div>
 ''' if individual_chart_html else ''}
 
