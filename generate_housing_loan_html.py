@@ -124,6 +124,10 @@ def find_previous_run(sorted_runs, min_gap_days: int = 6):
     while testing) - it would then compare against a run from hours ago
     instead of the previous week, making the trend meaningless.
 
+    Additionally, the candidate run must have valid data (zinssatz != '-')
+    to be usable for trend comparison. Runs with invalid/placeholder data
+    are skipped.
+
     Returns None if there's no run far enough in the past yet.
     """
     if len(sorted_runs) < 2:
@@ -140,7 +144,20 @@ def find_previous_run(sorted_runs, min_gap_days: int = 6):
         if candidate_date is None:
             continue
         if (latest_date - candidate_date).days >= min_gap_days:
-            return candidate
+            # Check if this candidate has valid data (not all zinssatz = '-')
+            variations = candidate.get('variations', [])
+            if not variations:
+                continue
+
+            # Count how many variations have valid zinssatz (not '-')
+            valid_count = sum(
+                1 for v in variations
+                if v.get('zinssatz') and v.get('zinssatz') != '-'
+            )
+
+            # Only return this candidate if it has at least some valid data
+            if valid_count > 0:
+                return candidate
 
     return None
 
