@@ -839,32 +839,6 @@ class AustrianBankScraper:
                             continue
                     return None
 
-                def _find_input_near_label(label_text, exclude_id_substrings=()):
-                    """Locate the <input> associated with a visible label,
-                    without relying on a known id/name/class. Bank Austria's
-                    Laufzeit field (id="duration") sits right after the
-                    Kreditbetrag label in document order, so a plain
-                    "following::input[1]" search can skip past Kreditbetrag's
-                    own field and grab the wrong one - exclude_id_substrings
-                    filters those out."""
-                    def _excluded(el):
-                        el_id = (el.get_attribute('id') or '').lower()
-                        return any(sub in el_id for sub in exclude_id_substrings)
-
-                    xpaths = [
-                        f"//*[contains(text(), '{label_text}')]/ancestor::*[position()<=3]//input",
-                        f"//*[contains(text(), '{label_text}')]/following::input",
-                        f"//input[contains(@id, '{label_text.lower()}') or contains(@name, '{label_text.lower()}')]",
-                    ]
-                    for xpath in xpaths:
-                        try:
-                            elems = [e for e in self.driver.find_elements(By.XPATH, xpath) if not _excluded(e)]
-                            if elems:
-                                return elems[0]
-                        except Exception:
-                            continue
-                    return None
-
                 def _fill_input(input_el, value):
                     _safe_click(input_el)
                     input_el.send_keys(Keys.CONTROL + "a")
@@ -944,43 +918,39 @@ class AustrianBankScraper:
                         else:
                             logger.warning("Bank Austria: could not find/click FIXZINSSATZ toggle")
 
-                        # 2) Kreditbetrag input. Exclude the Laufzeit field
-                        # (id="duration", confirmed from production) so a
-                        # document-order search doesn't grab the wrong input.
+                        # 2) Kreditbetrag (amount) input. Confirmed from real
+                        # page markup: a plain Ant Design text input with
+                        # id="amount" - there is no "Kreditbetrag" label text
+                        # anywhere near it (that word only appears inside the
+                        # Laufzeit field's label, "Laufzeit (abhängig vom
+                        # Kreditbetrag)"), which is why a label-text search
+                        # kept grabbing the wrong field. Use the id directly.
                         try:
-                            betrag_input = _find_input_near_label("Kreditbetrag", exclude_id_substrings=("duration",))
-                            if betrag_input:
-                                result = _fill_input(betrag_input, "10000")
-                                logger.info(f"Bank Austria: Kreditbetrag set to '{result}'")
+                            amount_inputs = self.driver.find_elements(By.ID, "amount")
+                            if amount_inputs:
+                                result = _fill_input(amount_inputs[0], "10000")
+                                logger.info(f"Bank Austria: Kreditbetrag (amount) set to '{result}'")
                             else:
-                                logger.warning("Bank Austria: could not locate Kreditbetrag input")
+                                logger.warning("Bank Austria: could not locate #amount input")
                         except Exception as e:
                             logger.warning(f"Bank Austria: could not set Kreditbetrag: {e}")
 
                         # 3) Laufzeit - confirmed from production to be an Ant
-                        # Design Select (id="duration", class
-                        # "ant-select-selection-search-input"). Ant renders a
-                        # hidden/search <input> that's visually covered by the
-                        # styled ".ant-select-selector" box sitting on top of
-                        # it, so clicking the input directly gets intercepted
-                        # ("not clickable ... another element <div> obscures
-                        # it") - click the visible selector wrapper instead.
+                        # Design Select. Its outer wrapper carries
+                        # data-testid="duration" (the element to click to open
+                        # it - the inner #duration search <input> is visually
+                        # covered by the styled selector box, so clicking it
+                        # directly gets intercepted). Options are
+                        # <div role="option" title="N Jahre"> (durations are
+                        # labeled in years, not months - "5 Jahre" == 60
+                        # Monate, matching the other banks in this file).
                         try:
-                            duration_inputs = self.driver.find_elements(By.CSS_SELECTOR, "#duration, input[id*='duration']")
-                            trigger = None
-                            if duration_inputs:
-                                try:
-                                    trigger = duration_inputs[0].find_element(
-                                        By.XPATH, "./ancestor::*[contains(@class, 'ant-select')][1]"
-                                    )
-                                except Exception:
-                                    trigger = duration_inputs[0]
-
+                            trigger_els = self.driver.find_elements(By.CSS_SELECTOR, "div[data-testid='duration']")
                             opened = False
-                            if trigger:
-                                _safe_click(trigger)
+                            if trigger_els:
+                                _safe_click(trigger_els[0])
                                 opened = True
-                                logger.info("Bank Austria: opened Laufzeit dropdown via Ant Select wrapper for #duration")
+                                logger.info("Bank Austria: opened Laufzeit dropdown via div[data-testid='duration']")
                             else:
                                 opened_xpath = _click_by_text(
                                     ["Laufzeit wählen"],
@@ -993,14 +963,10 @@ class AustrianBankScraper:
                             if opened:
                                 time.sleep(1)
                                 option_xpaths = [
-                                    "//*[contains(@class, 'ant-select-item-option')][contains(., '60')]",
-                                    "//*[@role='option'][contains(., '60')]",
-                                    "//li[contains(., '60') and (contains(@class, 'option') or ancestor::*[@role='listbox'])]",
-                                    "//*[contains(@class, 'ant-select-item-option')][contains(., '5 Jahre')]",
-                                    "//*[@role='option'][contains(., '5 Jahre')]",
-                                    "//*[contains(@class, 'ant-select-item-option')][1]",
-                                    "//*[@role='option'][1]",
-                                    "//li[contains(@class, 'option')][1]",
+                                    "//div[@role='option'][@title='5 Jahre']",
+                                    "//div[@role='option'][contains(@title, '5 Jahre')]",
+                                    "//div[@role='option'][contains(., '60')]",
+                                    "//div[@role='option'][@title and @title!='Laufzeit wählen'][1]",
                                 ]
                                 option_clicked = False
                                 for xpath in option_xpaths:
