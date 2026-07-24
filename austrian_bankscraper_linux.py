@@ -757,77 +757,167 @@ class AustrianBankScraper:
                 )
 
             elif bank_name == 'bankaustria':
-                # Bank Austria Consumer Loan (Konsumkredit) - SPA scraping
+                # Bank Austria Consumer Loan (Konsumkredit).
+                #
+                # This is a heavy Webpack Module Federation SPA (a "container"
+                # app that lazy-loads a separate "workflow-manager" remote,
+                # which itself loads further chunks) - it needs much more than
+                # a flat few-second sleep to finish bootstrapping. Rather than
+                # trying to drive the calculator's amount/duration inputs
+                # (selectors we can't verify without seeing the live DOM), this
+                # follows the same approach that already works for Raiffeisen
+                # in this file: Austrian/EU consumer credit law requires a
+                # "repräsentatives Beispiel" (representative example) with
+                # Sollzinssatz/Effektivzinssatz/Kreditbetrag/etc. on every loan
+                # advertisement page by default, with no interaction needed, so
+                # we search for that block using the same broad selector +
+                # XPath text fallbacks and the bank's field_mapping.
                 logger.info(f"Scraping Bank Austria consumer loan page...")
 
                 sollzinssatz = effektiver_jahreszins = nettokreditbetrag = vertragslaufzeit = gesamtbetrag = monatliche_rate = None
                 min_betrag = max_betrag = min_laufzeit = max_laufzeit = None
+                page_text = ""
 
                 try:
-                    # Wait for page to load (SPA)
-                    time.sleep(5)
-
-                    # Try to find and set the loan amount input (10000 EUR)
+                    # Give the module-federation bootstrap real time to finish
+                    # instead of a flat sleep: wait for any of the expected
+                    # disclosure labels to show up in the rendered DOM.
                     try:
-                        # Look for amount input field
-                        amount_input = WebDriverWait(self.driver, 10).until(
-                            EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='number'], input[type='text'][name*='amount'], input[data-testid*='amount']"))
+                        WebDriverWait(self.driver, 45).until(
+                            lambda d: any(
+                                term in d.find_element(By.TAG_NAME, "body").text
+                                for term in ("Sollzinssatz", "Effektivzinssatz", "Repräsentatives", "Kreditbetrag")
+                            )
                         )
-                        amount_input.clear()
-                        amount_input.send_keys("10000")
-                        logger.info("Bank Austria: Set loan amount to 10000")
-                        time.sleep(2)
+                        logger.info("Bank Austria: page content detected")
                     except Exception as e:
-                        logger.warning(f"Bank Austria: Could not find amount input: {e}")
+                        logger.warning(f"Bank Austria: representative-example text never appeared within 45s: {e}")
+                    time.sleep(3)  # let any late-arriving numbers settle
 
-                    # Try to find duration input/slider (60 months)
+                    # Handle cookie banner - same best-effort approach as Raiffeisen
                     try:
-                        duration_input = self.driver.find_element(By.CSS_SELECTOR, "input[name*='duration'], input[data-testid*='duration'], input[name*='laufzeit']")
-                        duration_input.clear()
-                        duration_input.send_keys("60")
-                        logger.info("Bank Austria: Set duration to 60 months")
-                        time.sleep(2)
+                        cookie_selectors = [
+                            (By.XPATH, "//button[contains(text(), 'Zustimmen')]"),
+                            (By.XPATH, "//button[contains(text(), 'Akzeptieren')]"),
+                            (By.XPATH, "//button[contains(text(), 'Alle akzeptieren')]"),
+                            (By.ID, "onetrust-accept-btn-handler"),
+                            (By.CSS_SELECTOR, "[id*='cookie'][id*='accept']"),
+                            (By.CSS_SELECTOR, "[class*='cookie'][class*='accept']"),
+                            (By.CSS_SELECTOR, "[class*='consent'][class*='accept']"),
+                        ]
+                        for selector_type, selector_value in cookie_selectors:
+                            try:
+                                cookie_button = WebDriverWait(self.driver, 3).until(
+                                    EC.element_to_be_clickable((selector_type, selector_value))
+                                )
+                                cookie_button.click()
+                                logger.info(f"Bank Austria: cookie banner accepted via {selector_type}, {selector_value}")
+                                time.sleep(2)
+                                break
+                            except Exception:
+                                continue
                     except Exception as e:
-                        logger.warning(f"Bank Austria: Could not find duration input: {e}")
+                        logger.warning(f"Bank Austria: error handling cookie banner (continuing anyway): {e}")
 
-                    # Wait for calculation to update
-                    time.sleep(3)
-
-                    # Try to extract the displayed rate information from the page
-                    page_text = self.driver.find_element(By.TAG_NAME, "body").text
-
-                    # Parse interest rates from page text using regex
-                    # Look for patterns like "9,90 %" or "9.90%"
-                    rate_patterns = [
-                        r'(?:Sollzinssatz|Nominalzins)[:\s]*(\d+[.,]\d+)\s*%',
-                        r'(?:Effektiv|eff\.?\s*Jahreszins)[:\s]*(\d+[.,]\d+)\s*%',
-                        r'(\d+[.,]\d+)\s*%\s*(?:p\.?\s*a\.?|effektiv)',
+                    # Try to find the representative-example element (same
+                    # selector strategy as Raiffeisen), fall back to whole body
+                    element = None
+                    selectors = [
+                        '[class*="representative"]',
+                        '[class*="credit-calculator"]',
+                        '[class*="berechnungsbeispiel"]',
+                        '[id*="representative"]',
+                        '[id*="calculator"]',
                     ]
+                    for selector in selectors:
+                        try:
+                            element = WebDriverWait(self.driver, 5).until(
+                                EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                            )
+                            if element:
+                                logger.info(f"Bank Austria: found element with selector: {selector}")
+                                break
+                        except Exception:
+                            continue
 
-                    for pattern in rate_patterns:
-                        match = re.search(pattern, page_text, re.IGNORECASE)
-                        if match:
-                            rate_value = match.group(1).replace(',', '.')
-                            if 'effektiv' in pattern.lower():
-                                effektiver_jahreszins = f"{rate_value} %"
-                            else:
-                                sollzinssatz = f"{rate_value} %"
-                            logger.info(f"Bank Austria: Found rate from pattern: {match.group(0)}")
+                    if not element:
+                        xpath_options = [
+                            "//*[contains(text(), 'Sollzinssatz')]",
+                            "//*[contains(text(), 'Repräsentatives')]",
+                            "//*[contains(text(), 'Effektivzinssatz')]",
+                        ]
+                        for xpath in xpath_options:
+                            try:
+                                text_element = WebDriverWait(self.driver, 5).until(
+                                    EC.presence_of_element_located((By.XPATH, xpath))
+                                )
+                                element = text_element.find_element(By.XPATH, "./ancestor::div[1] | ./ancestor::section[1]")
+                                logger.info(f"Bank Austria: found element using XPath text search: {xpath}")
+                                break
+                            except Exception:
+                                continue
 
-                    # Look for monthly rate
-                    rate_match = re.search(r'(?:Monatliche?\s*Rate|Rate)[:\s]*€?\s*(\d+[.,]\d+)', page_text, re.IGNORECASE)
-                    if rate_match:
-                        monatliche_rate = f"{rate_match.group(1).replace(',', '.')} EUR"
-                        logger.info(f"Bank Austria: Found monthly rate: {monatliche_rate}")
+                    page_text = (element.text if element else self.driver.find_element(By.TAG_NAME, "body").text)
+                    logger.info(f"Bank Austria: extracted text ({len(page_text)} chars)")
 
-                    # Default values if not found
-                    nettokreditbetrag = "10.000 EUR"
-                    vertragslaufzeit = "60 Monate"
+                    # Field-mapping-driven extraction (same approach as Raiffeisen)
+                    mapping = self.field_mapping[bank_name]
+
+                    def extract(label, value_pattern):
+                        m = re.search(rf"{re.escape(label)}\s*:?\s*({value_pattern})", page_text, re.IGNORECASE)
+                        return m.group(1).strip() if m else None
+
+                    percent_pattern = r'[\d.,]+\s*%'
+                    euro_pattern = r'[\d.,]+\s*(?:€|EUR|Euro)'
+                    duration_pattern = r'\d+\s*(?:Monate?|Jahre?)'
+
+                    sollzinssatz = extract(mapping['sollzinssatz'], percent_pattern)
+                    effektiver_jahreszins = extract(mapping['effektiver_jahreszins'], percent_pattern)
+                    nettokreditbetrag = extract(mapping['nettokreditbetrag'], euro_pattern)
+                    vertragslaufzeit = extract(mapping['vertragslaufzeit'], duration_pattern)
+                    gesamtbetrag = extract(mapping['gesamtbetrag'], euro_pattern)
+                    monatliche_rate = extract(mapping['monatliche_rate'], euro_pattern)
+
+                    # Parse min/max amount and duration, mirroring Raiffeisen's
+                    # "Produktangaben" range parsing where present
+                    try:
+                        produktangaben_match = re.search(r'Produktangaben:?(.*)', page_text, re.DOTALL)
+                        if produktangaben_match:
+                            produktangaben = produktangaben_match.group(1)
+                            betrag_match = re.search(r'([\d.]+)\s*-\s*([\d.]+)\s*(?:€|EUR|Euro)', produktangaben)
+                            if betrag_match:
+                                min_betrag = betrag_match.group(1).replace('.', '')
+                                max_betrag = betrag_match.group(2).replace('.', '')
+                            laufzeit_match = re.search(r'(\d+)\s*-\s*(\d+)\s*Monate', produktangaben)
+                            if laufzeit_match:
+                                min_laufzeit = laufzeit_match.group(1)
+                                max_laufzeit = laufzeit_match.group(2)
+                    except Exception as e:
+                        logger.warning(f"Bank Austria: could not parse min/max amount or duration: {e}")
+
+                    logger.info(
+                        f"Bank Austria extracted - sollzinssatz: {sollzinssatz}, effektiver: {effektiver_jahreszins}, "
+                        f"nettokreditbetrag: {nettokreditbetrag}, vertragslaufzeit: {vertragslaufzeit}, "
+                        f"gesamtbetrag: {gesamtbetrag}, rate: {monatliche_rate}"
+                    )
 
                     # Take a debug screenshot
                     self.driver.save_screenshot(f"bankaustria_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
 
-                    logger.info(f"Bank Austria extracted - sollzinssatz: {sollzinssatz}, effektiver: {effektiver_jahreszins}, rate: {monatliche_rate}")
+                    if sollzinssatz is None and effektiver_jahreszins is None:
+                        # Nothing matched - dump page source too so a failed
+                        # run leaves enough to diagnose the real selectors from,
+                        # instead of just an empty result next time.
+                        debug_html_path = f"bankaustria_pagesource_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+                        try:
+                            with open(debug_html_path, 'w', encoding='utf-8') as f:
+                                f.write(self.driver.page_source)
+                            logger.warning(
+                                f"Bank Austria: no rates matched field_mapping - saved page source to "
+                                f"{debug_html_path} and body text (first 1000 chars): {page_text[:1000]!r}"
+                            )
+                        except Exception as e:
+                            logger.warning(f"Bank Austria: could not save debug page source: {e}")
 
                 except Exception as e:
                     logger.error(f"Error scraping Bank Austria: {str(e)}")
