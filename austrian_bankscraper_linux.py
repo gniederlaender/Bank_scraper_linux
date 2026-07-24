@@ -853,6 +853,32 @@ class AustrianBankScraper:
                         self.driver.execute_script("arguments[0].dispatchEvent(new Event('change', {bubbles: true}));", input_el)
                     return input_el.get_attribute('value')
 
+                def _extract_offer_fields():
+                    """Parse the structured live-updating result block that
+                    appears once Kreditbetrag + Laufzeit are set (confirmed
+                    from real production markup: div[data-testid=
+                    'expectedoffer-offerfields'] containing
+                    div[data-testid='offerfield-sm'] label/value pairs, e.g.
+                    "Kreditbetrag" -> "10.000,00 €", "FIXZINSSATZ" ->
+                    "7,675 % p.a." - no 'Weiter' click needed). Returns a
+                    dict of label -> value text, or {} if not present yet."""
+                    fields = {}
+                    containers = self.driver.find_elements(
+                        By.CSS_SELECTOR, "div[data-testid='expectedoffer-offerfields']"
+                    )
+                    if not containers:
+                        return fields
+                    items = containers[0].find_elements(By.CSS_SELECTOR, "div[data-testid='offerfield-sm']")
+                    for item in items:
+                        try:
+                            label = item.find_element(By.CSS_SELECTOR, ".offer-item-label").text.strip()
+                            value = item.find_element(By.CSS_SELECTOR, ".offer-item-value").text.strip()
+                            if label:
+                                fields[label] = value
+                        except Exception:
+                            continue
+                    return fields
+
                 try:
                     # Give the module-federation bootstrap real time to finish
                     # instead of a flat sleep: wait for any of the expected
@@ -988,102 +1014,114 @@ class AustrianBankScraper:
                         except Exception as e:
                             logger.warning(f"Bank Austria: could not set Laufzeit: {e}")
 
-                        # 4) Advance to the results/representative-example step
-                        clicked_weiter = _click_by_text(["Weiter"])
-                        if clicked_weiter:
-                            logger.info(f"Bank Austria: clicked Weiter via {clicked_weiter}")
-                        else:
-                            logger.warning("Bank Austria: could not find/click Weiter button")
-
-                        # Give the next step time to render, then wait for
-                        # the representative-example rates to show up.
+                        # 4) The result block (div[data-testid=
+                        # 'expectedoffer-offerfields']) updates live as soon
+                        # as Kreditbetrag + Laufzeit are both set - confirmed
+                        # from real production markup, no 'Weiter' click
+                        # needed (and clicking it isn't desirable anyway,
+                        # since it would advance an actual loan-application
+                        # workflow rather than just reading the simulated
+                        # rate). Wait for it to appear.
                         try:
                             WebDriverWait(self.driver, 20).until(
-                                lambda d: any(
-                                    term in d.find_element(By.TAG_NAME, "body").text
-                                    for term in ("Sollzinssatz", "Effektivzinssatz", "Repräsentatives")
-                                )
+                                lambda d: d.find_elements(By.CSS_SELECTOR, "div[data-testid='expectedoffer-offerfields']")
                             )
-                            logger.info("Bank Austria: representative-example content detected after form submission")
+                            logger.info("Bank Austria: result block (expectedoffer-offerfields) detected")
                         except Exception as e:
-                            logger.warning(f"Bank Austria: representative-example text never appeared after submitting form: {e}")
-                        time.sleep(2)
+                            logger.warning(f"Bank Austria: result block never appeared: {e}")
+                        time.sleep(1)
                     else:
                         logger.info("Bank Austria: representative-example text already present - skipping form interaction")
 
-                    # Find the representative-example element (same selector
-                    # strategy as Raiffeisen). Since the page has already had
-                    # ample time to render by this point, use quick existence
-                    # checks instead of a fresh WebDriverWait per selector.
-                    element = None
-                    selectors = [
-                        '[class*="representative"]',
-                        '[class*="credit-calculator"]',
-                        '[class*="berechnungsbeispiel"]',
-                        '[id*="representative"]',
-                        '[id*="calculator"]',
-                    ]
-                    for selector in selectors:
-                        try:
-                            elems = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                            if elems:
-                                element = elems[0]
-                                logger.info(f"Bank Austria: found element with selector: {selector}")
-                                break
-                        except Exception:
-                            continue
+                    # Primary extraction path: the structured result block.
+                    # Its labels map directly onto our fields - no regex
+                    # guessing needed.
+                    offer_fields = _extract_offer_fields()
+                    page_text = "; ".join(f"{k}: {v}" for k, v in offer_fields.items())
 
-                    if not element:
-                        xpath_options = [
-                            "//*[contains(text(), 'Sollzinssatz')]",
-                            "//*[contains(text(), 'Repräsentatives')]",
-                            "//*[contains(text(), 'Effektivzinssatz')]",
+                    if offer_fields:
+                        logger.info(f"Bank Austria: parsed offer fields: {offer_fields}")
+                        sollzinssatz = offer_fields.get('FIXZINSSATZ') or offer_fields.get('Sollzinssatz')
+                        effektiver_jahreszins = offer_fields.get('Effektivzinssatz')
+                        nettokreditbetrag = offer_fields.get('Kreditbetrag')
+                        vertragslaufzeit = offer_fields.get('Laufzeit')
+                        gesamtbetrag = offer_fields.get('Zu zahlender Gesamtbetrag')
+                        monatliche_rate = offer_fields.get('Monatliche rate') or offer_fields.get('Monatliche Rate')
+
+                    # Fallback: the older free-text search, in case the
+                    # structured result block above wasn't found (e.g. the
+                    # page layout changed) - same approach as Raiffeisen.
+                    if not offer_fields:
+                        element = None
+                        selectors = [
+                            '[class*="representative"]',
+                            '[class*="credit-calculator"]',
+                            '[class*="berechnungsbeispiel"]',
+                            '[id*="representative"]',
+                            '[id*="calculator"]',
                         ]
-                        for xpath in xpath_options:
+                        for selector in selectors:
                             try:
-                                text_elems = self.driver.find_elements(By.XPATH, xpath)
-                                if text_elems:
-                                    element = text_elems[0].find_element(By.XPATH, "./ancestor::div[1] | ./ancestor::section[1]")
-                                    logger.info(f"Bank Austria: found element using XPath text search: {xpath}")
+                                elems = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                                if elems:
+                                    element = elems[0]
+                                    logger.info(f"Bank Austria: found element with selector: {selector}")
                                     break
                             except Exception:
                                 continue
 
-                    page_text = (element.text if element else self.driver.find_element(By.TAG_NAME, "body").text)
-                    logger.info(f"Bank Austria: extracted text ({len(page_text)} chars)")
+                        if not element:
+                            xpath_options = [
+                                "//*[contains(text(), 'Sollzinssatz')]",
+                                "//*[contains(text(), 'Repräsentatives')]",
+                                "//*[contains(text(), 'Effektivzinssatz')]",
+                            ]
+                            for xpath in xpath_options:
+                                try:
+                                    text_elems = self.driver.find_elements(By.XPATH, xpath)
+                                    if text_elems:
+                                        element = text_elems[0].find_element(By.XPATH, "./ancestor::div[1] | ./ancestor::section[1]")
+                                        logger.info(f"Bank Austria: found element using XPath text search: {xpath}")
+                                        break
+                                except Exception:
+                                    continue
 
-                    # Field-mapping-driven extraction (same approach as Raiffeisen)
-                    mapping = self.field_mapping[bank_name]
+                        page_text = (element.text if element else self.driver.find_element(By.TAG_NAME, "body").text)
+                        logger.info(f"Bank Austria: extracted text ({len(page_text)} chars)")
 
-                    def extract(label, value_pattern):
-                        m = re.search(rf"{re.escape(label)}\s*:?\s*({value_pattern})", page_text, re.IGNORECASE)
-                        return m.group(1).strip() if m else None
+                        # Field-mapping-driven extraction (same approach as Raiffeisen)
+                        mapping = self.field_mapping[bank_name]
 
-                    percent_pattern = r'[\d.,]+\s*%'
-                    euro_pattern = r'[\d.,]+\s*(?:€|EUR|Euro)'
-                    duration_pattern = r'\d+\s*(?:Monate?|Jahre?)'
+                        def extract(label, value_pattern):
+                            m = re.search(rf"{re.escape(label)}\s*:?\s*({value_pattern})", page_text, re.IGNORECASE)
+                            return m.group(1).strip() if m else None
 
-                    sollzinssatz = extract(mapping['sollzinssatz'], percent_pattern)
-                    effektiver_jahreszins = extract(mapping['effektiver_jahreszins'], percent_pattern)
-                    nettokreditbetrag = extract(mapping['nettokreditbetrag'], euro_pattern)
-                    vertragslaufzeit = extract(mapping['vertragslaufzeit'], duration_pattern)
-                    gesamtbetrag = extract(mapping['gesamtbetrag'], euro_pattern)
-                    monatliche_rate = extract(mapping['monatliche_rate'], euro_pattern)
+                        percent_pattern = r'[\d.,]+\s*%'
+                        euro_pattern = r'[\d.,]+\s*(?:€|EUR|Euro)'
+                        duration_pattern = r'\d+\s*(?:Monate?|Jahre?)'
 
-                    # Parse min/max amount and duration, mirroring Raiffeisen's
-                    # "Produktangaben" range parsing where present
+                        sollzinssatz = extract(mapping['sollzinssatz'], percent_pattern)
+                        effektiver_jahreszins = extract(mapping['effektiver_jahreszins'], percent_pattern)
+                        nettokreditbetrag = extract(mapping['nettokreditbetrag'], euro_pattern)
+                        vertragslaufzeit = extract(mapping['vertragslaufzeit'], duration_pattern)
+                        gesamtbetrag = extract(mapping['gesamtbetrag'], euro_pattern)
+                        monatliche_rate = extract(mapping['monatliche_rate'], euro_pattern)
+
+                    # Parse min/max amount and duration from the field labels
+                    # visible above the inputs (confirmed from real markup:
+                    # "Betrag zwischen 2.000 € und 50.000 €" and "Laufzeit
+                    # zwischen 1 und 10 Jahre" - Bank Austria has no
+                    # "Produktangaben" section like Raiffeisen).
                     try:
-                        produktangaben_match = re.search(r'Produktangaben:?(.*)', page_text, re.DOTALL)
-                        if produktangaben_match:
-                            produktangaben = produktangaben_match.group(1)
-                            betrag_match = re.search(r'([\d.]+)\s*-\s*([\d.]+)\s*(?:€|EUR|Euro)', produktangaben)
-                            if betrag_match:
-                                min_betrag = betrag_match.group(1).replace('.', '')
-                                max_betrag = betrag_match.group(2).replace('.', '')
-                            laufzeit_match = re.search(r'(\d+)\s*-\s*(\d+)\s*Monate', produktangaben)
-                            if laufzeit_match:
-                                min_laufzeit = laufzeit_match.group(1)
-                                max_laufzeit = laufzeit_match.group(2)
+                        full_body_text = self.driver.find_element(By.TAG_NAME, "body").text
+                        betrag_match = re.search(r'Betrag zwischen\s*([\d.]+)\s*€?\s*und\s*([\d.]+)\s*€', full_body_text)
+                        if betrag_match:
+                            min_betrag = betrag_match.group(1).replace('.', '')
+                            max_betrag = betrag_match.group(2).replace('.', '')
+                        laufzeit_match = re.search(r'Laufzeit zwischen\s*(\d+)\s*und\s*(\d+)\s*Jahre', full_body_text)
+                        if laufzeit_match:
+                            min_laufzeit = str(int(laufzeit_match.group(1)) * 12)
+                            max_laufzeit = str(int(laufzeit_match.group(2)) * 12)
                     except Exception as e:
                         logger.warning(f"Bank Austria: could not parse min/max amount or duration: {e}")
 
