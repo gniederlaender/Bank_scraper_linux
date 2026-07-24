@@ -873,8 +873,14 @@ class AustrianBankScraper:
                         try:
                             label = item.find_element(By.CSS_SELECTOR, ".offer-item-label").text.strip()
                             value = item.find_element(By.CSS_SELECTOR, ".offer-item-value").text.strip()
+                            # Keys normalized to uppercase: production renders
+                            # these labels via CSS text-transform: uppercase
+                            # (confirmed from a real run - "KREDITBETRAG" etc,
+                            # not the "Kreditbetrag" mixed case seen in the
+                            # raw captured markup), so Selenium's .text
+                            # reflects the rendered (transformed) text.
                             if label:
-                                fields[label] = value
+                                fields[label.upper()] = value
                         except Exception:
                             continue
                     return fields
@@ -1041,12 +1047,14 @@ class AustrianBankScraper:
 
                     if offer_fields:
                         logger.info(f"Bank Austria: parsed offer fields: {offer_fields}")
-                        sollzinssatz = offer_fields.get('FIXZINSSATZ') or offer_fields.get('Sollzinssatz')
-                        effektiver_jahreszins = offer_fields.get('Effektivzinssatz')
-                        nettokreditbetrag = offer_fields.get('Kreditbetrag')
-                        vertragslaufzeit = offer_fields.get('Laufzeit')
-                        gesamtbetrag = offer_fields.get('Zu zahlender Gesamtbetrag')
-                        monatliche_rate = offer_fields.get('Monatliche rate') or offer_fields.get('Monatliche Rate')
+                        # Keys are uppercased in _extract_offer_fields() -
+                        # lookups here must match.
+                        sollzinssatz = offer_fields.get('FIXZINSSATZ') or offer_fields.get('SOLLZINSSATZ')
+                        effektiver_jahreszins = offer_fields.get('EFFEKTIVZINSSATZ')
+                        nettokreditbetrag = offer_fields.get('KREDITBETRAG')
+                        vertragslaufzeit = offer_fields.get('LAUFZEIT')
+                        gesamtbetrag = offer_fields.get('ZU ZAHLENDER GESAMTBETRAG')
+                        monatliche_rate = offer_fields.get('MONATLICHE RATE')
 
                     # Fallback: the older free-text search, in case the
                     # structured result block above wasn't found (e.g. the
