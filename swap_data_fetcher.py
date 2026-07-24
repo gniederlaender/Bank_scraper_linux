@@ -692,14 +692,21 @@ if __name__ == "__main__":
     import sys
 
     parser = argparse.ArgumentParser(description='Fetch SWAP and Euribor rates')
-    parser.add_argument('--start', type=str, required=True, help='Start date (YYYY-MM)')
-    parser.add_argument('--end', type=str, required=True, help='End date (YYYY-MM)')
+    parser.add_argument('--start', type=str, required=True, help='Start date (YYYY-MM or YYYY-MM-DD)')
+    parser.add_argument('--end', type=str, required=True, help='End date (YYYY-MM or YYYY-MM-DD)')
     parser.add_argument('--output', type=str, default='swap_data.js', help='Output file path')
 
     args = parser.parse_args()
 
-    start_date = datetime.strptime(args.start, "%Y-%m")
-    end_date = datetime.strptime(args.end, "%Y-%m")
+    def _parse_date(value: str) -> datetime:
+        """Accept both YYYY-MM (defaults to day 1) and YYYY-MM-DD."""
+        try:
+            return datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            return datetime.strptime(value, "%Y-%m")
+
+    start_date = _parse_date(args.start)
+    end_date = _parse_date(args.end)
 
     data = fetch_all_rates(start_date, end_date)
 

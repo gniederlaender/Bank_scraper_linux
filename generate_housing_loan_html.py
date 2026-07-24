@@ -990,10 +990,10 @@ def get_date_range_from_db():
         view_exists = cursor.fetchone()
         
         if not view_exists:
-            # Default to last 12 months
-            end_date = datetime.now().replace(day=1)
+            # Default to last 12 months, up to today (not truncated to month start)
+            end_date = datetime.now()
             start_date = datetime(end_date.year - 1, end_date.month, 1)
-            print(f"[INFO] View not found, using default date range: {start_date.strftime('%Y-%m')} to {end_date.strftime('%Y-%m')}")
+            print(f"[INFO] View not found, using default date range: {start_date.strftime('%Y-%m')} to {end_date.strftime('%Y-%m-%d')}")
             return start_date, end_date
         
         # Get min and max scrape dates from the view
@@ -1008,36 +1008,36 @@ def get_date_range_from_db():
         min_date_str = result[0]
         max_date_str = result[1]
         
-        if min_date_str and max_date_str:
-            # Parse dates (assuming ISO format or similar)
+        # SWAP/Euribor rates are independent of the housing-loan scraping runs,
+        # so the upper bound should always be today (full precision), not the
+        # last scrape date truncated to the 1st of the month - otherwise the
+        # chart never shows data past the first few days of the current month.
+        end_date = datetime.now()
+
+        if min_date_str:
             try:
                 min_date = datetime.fromisoformat(min_date_str.replace('Z', '+00:00'))
-                max_date = datetime.fromisoformat(max_date_str.replace('Z', '+00:00'))
-                
+
                 # Ensure we have at least 12 months of data
-                # If the range is shorter, extend backwards
-                if (max_date - min_date).days < 365:
-                    start_date = datetime(max_date.year - 1, max_date.month, 1)
-                    end_date = max_date.replace(day=1)
+                if (end_date - min_date).days < 365:
+                    start_date = datetime(end_date.year - 1, end_date.month, 1)
                 else:
                     start_date = min_date.replace(day=1)
-                    end_date = max_date.replace(day=1)
-                
-                print(f"[INFO] Date range from DB: {start_date.strftime('%Y-%m')} to {end_date.strftime('%Y-%m')}")
+
+                print(f"[INFO] Date range from DB: {start_date.strftime('%Y-%m')} to {end_date.strftime('%Y-%m-%d')}")
                 return start_date, end_date
             except (ValueError, AttributeError) as e:
                 print(f"[WARN] Could not parse dates from DB: {e}")
-        
+
         # Fallback to default
-        end_date = datetime.now().replace(day=1)
         start_date = datetime(end_date.year - 1, end_date.month, 1)
-        print(f"[INFO] Using default date range: {start_date.strftime('%Y-%m')} to {end_date.strftime('%Y-%m')}")
+        print(f"[INFO] Using default date range: {start_date.strftime('%Y-%m')} to {end_date.strftime('%Y-%m-%d')}")
         return start_date, end_date
-        
+
     except Exception as e:
         print(f"[WARN] Error extracting date range from DB: {e}")
         # Fallback to default
-        end_date = datetime.now().replace(day=1)
+        end_date = datetime.now()
         start_date = datetime(end_date.year - 1, end_date.month, 1)
         return start_date, end_date
     finally:
@@ -2659,22 +2659,30 @@ def generate_html():
 
 
 def generate_email_html(png_base64, individual_png_base64=None):
-    """Generate simplified HTML for email with static PNG chart (no JavaScript)"""
-    
+    """
+    Generate static HTML for email (no JavaScript, so no filter accordions,
+    interactive Plotly charts, or the competitor-offer entry form). Mirrors
+    the redesigned web page's structure/section order as closely as an
+    email-safe rendering allows: Durchblicker chart + trend table,
+    Konkurrenzangebote chart + lowest-offers-last-30-days table, then
+    Marktzinsen (SWAP/Euribor) before OeNB, using the same shared
+    section-rendering functions as generate_html() so both stay in sync.
+    """
+
     if not png_base64:
         print("[WARN] No PNG data available, cannot generate email HTML")
         return False
-    
+
     # Get all runs data
     runs, all_variations = get_all_runs_data()
-    
+
     if not runs:
         print("[WARN] No data found in database")
         return False
-    
+
     # Get latest OeNB screenshots
     oenb_screenshots = get_latest_oenb_screenshots()
-    
+
     # Generate SWAP/Euribor charts for email
     print("[INFO] Generating SWAP/Euribor charts for email...")
     swap_chart_result = generate_swap_rates_chart()
@@ -2689,24 +2697,55 @@ def generate_email_html(png_base64, individual_png_base64=None):
         euribor_chart_html, euribor_png_base64 = euribor_chart_result
     else:
         euribor_chart_html, euribor_png_base64 = None, None
-    
-    # Get 25J run for table display (default)
+
+    # Lowest Sollzins per bank in the last 30 days, for the table under the
+    # Konkurrenzangebote chart (same helper as the web page)
+    try:
+        lowest_offers_table_html = generate_lowest_offers_table_html(get_all_loan_offers(), days=30)
+    except Exception as e:
+        print(f"[WARN] Could not build lowest-offers table for email: {e}")
+        lowest_offers_table_html = ''
+
+    # Get 25J run for the trend table (default), same as the web page's
+    # initial state
     latest_run = None
     latest_variations = None
-    
-    # Find the latest 25J run
+
     for run in runs:
         if run['laufzeit_jahre'] == 25:
             latest_run = run
             latest_variations = all_variations[run['id']]
             break
-    
-    # Fallback to first run if no 25J found
+
     if not latest_run:
         latest_run = runs[0]
         latest_variations = all_variations[latest_run['id']]
-    
-    # Create simplified HTML content for email (no JavaScript)
+
+    # Trend table: current vs. previous run (at least 6 days apart) for the
+    # same Laufzeit as latest_run, same logic as generate_html()
+    same_laufzeit_runs = [
+        {'run': run, 'variations': all_variations[run['id']]}
+        for run in runs if run['laufzeit_jahre'] == latest_run['laufzeit_jahre']
+    ]
+    same_laufzeit_runs.sort(key=lambda x: x['run']['scrape_date'], reverse=True)
+    previous_run_data = find_previous_run(same_laufzeit_runs, min_gap_days=6)
+    trend_rows = compute_trend_rows(
+        latest_variations, previous_run_data['variations'] if previous_run_data else None
+    )
+    trend_tbody_html = ''.join(
+        f'''
+                        <tr>
+                            <td class="fixierung-cell">{row['fixierung_jahre']}J</td>
+                            <td>{row['previous_short']}</td>
+                            <td>{row['current_short']}</td>
+                            <td>{trend_badge_html(row['trend'])}</td>
+                        </tr>'''
+        for row in trend_rows
+    )
+
+    # Create static HTML content for email (no JavaScript) - same design
+    # tokens and section markup as generate_html(), minus anything
+    # JS-dependent (filter accordions, Plotly, the offer-entry form)
     html_content = f'''<!DOCTYPE html>
 <html lang="de">
 <head>
@@ -2714,11 +2753,32 @@ def generate_email_html(png_base64, individual_png_base64=None):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bank Comparison - Housing Loan Analysis</title>
     <style>
+        :root {{
+            --color-bg: #f2f5f7;
+            --color-surface: #ffffff;
+            --color-primary: #0f3b52;
+            --color-primary-dark: #0a2b3d;
+            --color-accent: #0a8a9a;
+            --color-accent-light: #e3f4f6;
+            --color-text: #1b2733;
+            --color-text-muted: #5b6b78;
+            --color-border: #e2e8ee;
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --shadow-sm: 0 1px 3px rgba(15, 59, 82, 0.08);
+            --shadow-md: 0 6px 20px rgba(15, 59, 82, 0.09);
+            --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }}
+        * {{
+            box-sizing: border-box;
+        }}
         body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: var(--font-sans);
             margin: 0;
             padding: 20px;
-            background: linear-gradient(to bottom right, #f9fafb, #ffffff, #f3f4f6);
+            background: var(--color-bg);
+            color: var(--color-text);
             min-height: 100vh;
         }}
         .interactive-button {{
@@ -2726,450 +2786,202 @@ def generate_email_html(png_base64, individual_png_base64=None):
             width: fit-content;
             margin: 25px auto;
             padding: 15px 30px;
-            background-color: #667eea !important;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background-color: var(--color-primary) !important;
             color: white !important;
             text-decoration: none !important;
-            border-radius: 8px;
+            border-radius: var(--radius-sm);
             font-size: 1.1em;
             font-weight: bold;
             text-align: center;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-            border: 2px solid #667eea;
-            transition: all 0.3s;
+            box-shadow: var(--shadow-sm);
         }}
-        .interactive-button:hover {{
-            background-color: #764ba2 !important;
-            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
-            text-decoration: none !important;
-            color: white !important;
-        }}
-        .interactive-button:visited {{
-            color: white !important;
-            text-decoration: none !important;
-        }}
-        .interactive-button:link {{
+        .interactive-button:visited, .interactive-button:link {{
             color: white !important;
             text-decoration: none !important;
         }}
         .container {{
             max-width: 1200px;
             margin: 0 auto;
-            background-color: white;
+            background-color: var(--color-surface);
             padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-md);
         }}
         h1 {{
-            color: #2c3e50;
+            color: var(--color-primary);
             text-align: center;
             margin-bottom: 10px;
-            font-size: 2.2em;
+            font-size: 2.0em;
+            font-weight: 700;
         }}
         h2 {{
-            color: #2c3e50;
-            font-size: 1.3em;
+            color: var(--color-primary);
+            font-size: 1.25em;
             margin-bottom: 15px;
-            font-weight: 600;
-        }}
-        h3 {{
-            color: #2c3e50;
-            font-size: 1.1em;
-            margin-bottom: 12px;
-            font-weight: 600;
+            font-weight: 700;
         }}
         .subtitle {{
             text-align: center;
-            color: #7f8c8d;
+            color: var(--color-text-muted);
             margin-bottom: 30px;
-            font-size: 1.1em;
+            font-size: 1.05em;
         }}
         .chart-container {{
             margin-bottom: 40px;
-            padding: 25px;
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            text-align: center;
+            padding: 24px;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
         }}
         .chart-container img {{
             max-width: 100%;
             height: auto;
             border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }}
-        .run-info {{
-            background-color: #ecf0f1;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 30px;
-            border-left: 5px solid #3498db;
-        }}
-        .run-info h3 {{
-            margin-top: 0;
-            margin-bottom: 10px;
-            color: #2c3e50;
-            font-size: 1.0em;
-        }}
-        .run-info-text {{
-            color: #2c3e50;
-            font-size: 0.75em;
-            line-height: 1.6;
-            margin: 0;
-        }}
-        .run-info-grid {{
-            display: none;
-        }}
-        .info-item {{
-            display: none;
-        }}
-        .info-label {{
-            display: none;
-        }}
-        .info-value {{
-            display: none;
+        .chart-title {{
+            font-size: 1.2em;
+            font-weight: 700;
+            color: var(--color-primary);
+            margin: 0 0 16px;
         }}
         .table-container {{
             overflow-x: auto;
-            margin-bottom: 30px;
+            margin-bottom: 24px;
         }}
         table {{
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 20px;
-            font-size: 0.95em;
+            margin-bottom: 16px;
+            font-size: 0.9em;
         }}
         th {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--color-primary);
             color: white;
-            padding: 15px 12px;
+            padding: 12px;
             text-align: left;
             font-weight: 600;
         }}
         td {{
-            padding: 12px;
-            border-bottom: 1px solid #ecf0f1;
-        }}
-        tr:hover {{
-            background-color: #f8f9fa;
+            padding: 11px 12px;
+            border-bottom: 1px solid var(--color-border);
         }}
         tr:nth-child(even) {{
-            background-color: #fafbfc;
+            background-color: #f8fafb;
         }}
         .fixierung-cell {{
-            font-weight: bold;
-            color: #2c3e50;
-            background-color: #e8f4f8 !important;
+            font-weight: 700;
+            color: var(--color-primary);
+            background-color: var(--color-accent-light) !important;
+            border-left: 4px solid var(--color-accent);
         }}
         .rate-cell {{
-            font-weight: bold;
-            color: #27ae60;
-            font-size: 1.1em;
+            font-weight: 700;
+            color: var(--color-primary);
+            font-size: 1.05em;
         }}
         .timestamp {{
             text-align: center;
-            color: #7f8c8d;
-            font-size: 0.9em;
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 2px solid #ecf0f1;
-        }}
-        .highlight {{
-            background-color: #fff3cd !important;
+            color: var(--color-text-muted);
+            font-size: 0.85em;
+            margin-top: 28px;
+            padding-top: 18px;
+            border-top: 1px solid var(--color-border);
         }}
         @media (max-width: 768px) {{
             body {{
-                margin: 0;
                 padding: 5px;
             }}
             .container {{
-                margin: 0;
                 padding: 10px;
                 border-radius: 0;
                 box-shadow: none;
             }}
             h1 {{
                 font-size: 1.4em;
-                margin-bottom: 15px;
             }}
-            h2 {{
+            h2, .chart-title {{
                 font-size: 1.0em !important;
-                margin-bottom: 10px;
-            }}
-            h3 {{
-                font-size: 0.9em !important;
-                margin-bottom: 8px;
-            }}
-            .subtitle {{
-                font-size: 0.9em;
-                margin-bottom: 20px;
-            }}
-            .info-badge {{
-                font-size: 0.8em;
-                padding: 6px 12px;
-                margin: 3px;
-            }}
-            .run-info {{
-                padding: 15px;
-                margin-bottom: 20px;
-            }}
-            .run-info h3 {{
-                font-size: 0.9em;
-            }}
-            .run-info-text {{
-                font-size: 0.7em;
-            }}
-            .run-info-grid {{
-                display: none;
-            }}
-            .info-item {{
-                display: none;
             }}
             .chart-container {{
-                padding: 15px;
-                margin-bottom: 20px;
-            }}
-            .chart-controls {{
-                flex-direction: column;
-                gap: 15px;
                 padding: 12px;
-            }}
-            .control-group {{
-                width: 100%;
-                justify-content: space-between;
-                gap: 10px;
-            }}
-            .control-label {{
-                font-size: 13px;
-            }}
-            select, button {{
-                padding: 8px 10px;
-                font-size: 13px;
-                min-height: 36px;
-                flex: 1;
-            }}
-            select {{
-                min-width: auto;
-            }}
-            button {{
-                min-width: auto;
-            }}
-            /* Plotly chart mobile adjustments */
-            #plotly-chart {{
-                height: 400px !important;
-            }}
-            .js-plotly-plot .plotly .modebar {{
-                display: none !important;
-            }}
-            .js-plotly-plot .plotly .legend {{
-                display: none !important;
-            }}
-            /* Hide legend for individual offers chart on mobile */
-            #plotly-individual-offers-chart .js-plotly-plot .plotly .legend {{
-                display: none !important;
-            }}
-            /* Expand plot area when legend is hidden - adjust margins */
-            #plotly-individual-offers-chart .js-plotly-plot {{
-                width: 100% !important;
-                margin-right: 0 !important;
-            }}
-            #plotly-individual-offers-chart .js-plotly-plot .plotly {{
-                width: 100% !important;
-            }}
-            #plotly-individual-offers-chart .js-plotly-plot .plotly .main-svg {{
-                width: 100% !important;
             }}
             table {{
                 font-size: 11px;
-                min-width: 500px;
+                min-width: 450px;
             }}
             th, td {{
                 padding: 8px 4px;
                 white-space: nowrap;
-            }}
-            .fixierung-cell {{
-                font-size: 12px;
-            }}
-            .rate-cell {{
-                font-size: 12px;
-            }}
-            .table-container {{
-                margin-bottom: 20px;
-            }}
-            .timestamp {{
-                font-size: 0.8em;
-                margin-top: 20px;
-                padding-top: 15px;
-            }}
-        }}
-        @media (max-width: 480px) {{
-            body {{
-                padding: 2px;
-            }}
-            .container {{
-                padding: 5px;
-            }}
-            h1 {{
-                font-size: 1.2em;
-            }}
-            h2 {{
-                font-size: 0.9em !important;
-                margin-bottom: 8px;
-            }}
-            h3 {{
-                font-size: 0.85em !important;
-                margin-bottom: 6px;
-            }}
-            .chart-container {{
-                padding: 10px;
-            }}
-            .chart-controls {{
-                padding: 8px;
-            }}
-            .control-group {{
-                flex-direction: column;
-                align-items: stretch;
-                gap: 8px;
-            }}
-            .control-label {{
-                text-align: center;
-            }}
-            select, button {{
-                width: 100%;
-                margin: 2px 0;
-            }}
-            #plotly-chart {{
-                height: 300px !important;
-            }}
-            /* Hide legend for individual offers chart on small mobile */
-            #plotly-individual-offers-chart .js-plotly-plot .plotly .legend {{
-                display: none !important;
-            }}
-            /* Expand plot area when legend is hidden - adjust margins */
-            #plotly-individual-offers-chart .js-plotly-plot {{
-                width: 100% !important;
-                margin-right: 0 !important;
-            }}
-            #plotly-individual-offers-chart .js-plotly-plot .plotly {{
-                width: 100% !important;
-            }}
-            #plotly-individual-offers-chart .js-plotly-plot .plotly .main-svg {{
-                width: 100% !important;
-            }}
-            table {{
-                font-size: 10px;
-                min-width: 450px;
-            }}
-            th, td {{
-                padding: 6px 2px;
             }}
         }}
     </style>
 </head>
 <body>
     <div class="container">
-                <h1>🏠 Housing Loan Comparison</h1>
-                <div class="subtitle">
-                    Zinsentwicklung - 25 Jahre Laufzeit (Eff. Zinssatz)
-                </div>
-        
-        <a href="https://smartprototypes.net/Bank_market_overview/bank_comparison_housing_loan_durchblicker.html" class="interactive-button" target="_blank" style="background-color: #667eea !important; color: white !important; text-decoration: none !important;">
+        <h1>🏠 Housing Loan Comparison</h1>
+        <div class="subtitle">
+            Sollzins-Entwicklung - 25 Jahre Laufzeit
+        </div>
+
+        <a href="https://smartprototypes.net/Bank_market_overview/bank_comparison_housing_loan_durchblicker.html" class="interactive-button" target="_blank">
             🔗 Zu den interaktiven Charts
         </a>
-        
+
         <div class="chart-container">
-            <h2>📊 Wohnkredite - Durchblicker-Bestpreis</h2>
+            <div class="chart-title">📈 Wohnkredite - Durchblicker-Bestpreis</div>
             <img src="data:image/png;base64,{png_base64}" alt="Housing Loan Interest Rate Chart">
+
+            <div class="table-container" style="margin-top: 24px;">
+                <h2>📊 Trend - Sollzins je Fixlaufzeit ({latest_run['laufzeit_jahre']} Jahre Laufzeit)</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>FixLZ</th>
+                            <th>Voriger Lauf</th>
+                            <th>Aktueller Lauf</th>
+                            <th>Trend</th>
+                        </tr>
+                    </thead>
+                    <tbody>{trend_tbody_html}
+                    </tbody>
+                </table>
+            </div>
         </div>
-        
+
 {f'''
         <div class="chart-container" style="margin-top: 40px;">
-            <h2>💳 Wohnkredite - Konkurrenzangebote</h2>
+            <div class="chart-title">💳 Wohnkredite - Konkurrenzangebote</div>
             <img src="data:image/png;base64,{individual_png_base64}" alt="Individual Loan Offers Chart">
+{lowest_offers_table_html}
         </div>
 ''' if individual_png_base64 else ''}
-        
-        <div class="table-container">
-            <h2>📋 Finanzierungsdetails - Aktuelle Konditionen für 25 Jahre Laufzeit</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Fixlaufzeit</th>
-                        <th>Monatliche Rate</th>
-                        <th>Sollzins</th>
-                        <th>Effektiver Zinssatz</th>
-                        <th>Laufzeit</th>
-                        <th>Kreditbetrag</th>
-                        <th>Gesamtbetrag</th>
-                        <th>Einberechnete Kosten</th>
-                    </tr>
-                </thead>
-                <tbody>
 '''
-    
-    # Add table rows for latest variations
-    for var in latest_variations:
-        if var['rate']:
-            anschluss_note = f"<br><small style='color: #7f8c8d;'>Anschluss: {var['anschlusskondition']}</small>" if var['anschlusskondition'] else ""
-            
-            html_content += f'''
-                    <tr>
-                        <td class="fixierung-cell">{var['fixierung_jahre']}J</td>
-                        <td class="rate-cell">€{var['rate']:,.2f}</td>
-                        <td>{var['zinssatz']}{anschluss_note}</td>
-                        <td>{var['effektiver_zinssatz']}</td>
-                        <td>{var['laufzeit']}</td>
-                        <td>€{var['kreditbetrag']:,.2f}</td>
-                        <td>€{var['gesamtbetrag']:,.2f}</td>
-                        <td>{var['besicherung']}</td>
-                    </tr>
-'''
-        else:
-            html_content += f'''
-                    <tr>
-                        <td class="fixierung-cell">{var['fixierung_jahre']}J</td>
-                        <td colspan="7" style="text-align: center; color: #95a5a6;">Keine Daten verfügbar</td>
-                    </tr>
-'''
-    
-    html_content += f'''
-                </tbody>
-            </table>
-        </div>
-        
-        <div class="run-info">
-            <h3>📊 Parameter für 25 Jahre Laufzeit</h3>
-            <p class="run-info-text">Kreditbetrag: €{latest_run['kreditbetrag']:,.0f}, Laufzeit: {latest_run['laufzeit_jahre']} Jahre, Kaufpreis: €{latest_run['kaufpreis']:,.0f}, Kaufnebenkosten: €{latest_run['kaufnebenkosten']:,.0f}, Eigenmittel: €{latest_run['eigenmittel']:,.0f}, Haushalt Alter: {latest_run['haushalt_alter']} Jahre, Netto-Einkommen: €{latest_run['haushalt_einkommen']:,.2f}/Monat, Wohnnutzfläche: {latest_run['haushalt_nutzflaeche']} m²</p>
-        </div>
-        
-        <div class="timestamp">
-            Last Updated: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}<br>
-            Data Source: Housing Loan Database | Latest Run ID: {latest_run['id']}<br>
-        </div>
-'''
-    
-    # Add OeNB section if screenshots are available (for email, use base64)
-    oenb_section_html = generate_oenb_section_html(oenb_screenshots, for_email=True)
-    html_content += oenb_section_html
-    
-    # Add SWAP/Euribor section if charts are available (for email, use base64 PNG)
+
+    # Add SWAP/Euribor section first (Marktzinsen above OeNB), then OeNB -
+    # same order as generate_html()
     swap_euribor_section_html = generate_swap_euribor_section_html(
         swap_chart_html, euribor_chart_html, swap_png_base64, euribor_png_base64, for_email=True
     )
     html_content += swap_euribor_section_html
-    
-    html_content += '''
+
+    oenb_section_html = generate_oenb_section_html(oenb_screenshots, for_email=True)
+    html_content += oenb_section_html
+
+    html_content += f'''
+        <div class="timestamp">
+            Last Updated: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}<br>
+            Data Source: Housing Loan Database | Latest Run ID: {latest_run['id']}<br>
+        </div>
     </div>
 </body>
 </html>
 '''
-    
+
     # Write to file
     with open(HTML_EMAIL_PATH, 'w', encoding='utf-8') as f:
         f.write(html_content)
-    
+
     print(f"[OK] Email HTML page generated: {HTML_EMAIL_PATH}")
     return True
 

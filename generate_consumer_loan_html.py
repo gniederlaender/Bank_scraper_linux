@@ -870,19 +870,23 @@ def generate_html():
 
 
 def generate_email_html(png_base64):
-    """Generate simplified HTML for email with static PNG chart (no JavaScript)"""
-    
+    """
+    Generate static HTML for email (no JavaScript, so no filter accordion or
+    interactive Plotly chart). Mirrors the redesigned web page's design
+    tokens, chart-title/table markup and "Nur Sollzins" default wording.
+    """
+
     if not png_base64:
         print("[WARN] No PNG data available, cannot generate email HTML")
         return False
-    
+
     # Get latest data for table
     latest_data = get_latest_data()
-    
+
     if not latest_data:
         print("[WARN] No data found in database")
         return False
-    
+
     # Create simplified HTML content for email (no JavaScript)
     html_content = f'''<!DOCTYPE html>
 <html lang="de">
@@ -891,11 +895,31 @@ def generate_email_html(png_base64):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bank Comparison - Consumer Loan Analysis</title>
     <style>
+        :root {{
+            --color-bg: #f2f5f7;
+            --color-surface: #ffffff;
+            --color-primary: #0f3b52;
+            --color-accent: #0a8a9a;
+            --color-accent-light: #e3f4f6;
+            --color-text: #1b2733;
+            --color-text-muted: #5b6b78;
+            --color-border: #e2e8ee;
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --shadow-sm: 0 1px 3px rgba(15, 59, 82, 0.08);
+            --shadow-md: 0 6px 20px rgba(15, 59, 82, 0.09);
+            --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }}
+        * {{
+            box-sizing: border-box;
+        }}
         body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: var(--font-sans);
             margin: 0;
             padding: 20px;
-            background: linear-gradient(to bottom right, #f9fafb, #ffffff, #f3f4f6);
+            background: var(--color-bg);
+            color: var(--color-text);
             min-height: 100vh;
         }}
         .interactive-button {{
@@ -903,126 +927,148 @@ def generate_email_html(png_base64):
             width: fit-content;
             margin: 25px auto;
             padding: 15px 30px;
-            background-color: #667eea !important;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background-color: var(--color-primary) !important;
             color: white !important;
             text-decoration: none !important;
-            border-radius: 8px;
+            border-radius: var(--radius-sm);
             font-size: 1.1em;
             font-weight: bold;
             text-align: center;
-            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-            border: 2px solid #667eea;
-            transition: all 0.3s;
+            box-shadow: var(--shadow-sm);
         }}
-        .interactive-button:hover {{
-            background-color: #764ba2 !important;
-            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
-            text-decoration: none !important;
-            color: white !important;
-        }}
-        .interactive-button:visited {{
-            color: white !important;
-            text-decoration: none !important;
-        }}
-        .interactive-button:link {{
+        .interactive-button:visited, .interactive-button:link {{
             color: white !important;
             text-decoration: none !important;
         }}
         .container {{
             max-width: 1200px;
             margin: 0 auto;
-            background-color: white;
+            background-color: var(--color-surface);
             padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-md);
         }}
         h1 {{
-            color: #2c3e50;
+            color: var(--color-primary);
             text-align: center;
             margin-bottom: 10px;
-            font-size: 2.2em;
+            font-size: 2.0em;
+            font-weight: 700;
+        }}
+        h2 {{
+            color: var(--color-primary);
+            font-size: 1.25em;
+            margin-bottom: 15px;
+            font-weight: 700;
         }}
         .subtitle {{
             text-align: center;
-            color: #7f8c8d;
+            color: var(--color-text-muted);
             margin-bottom: 30px;
-            font-size: 1.1em;
+            font-size: 1.05em;
         }}
         .chart-container {{
             margin-bottom: 40px;
-            padding: 25px;
-            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-            border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-            text-align: center;
+            padding: 24px;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
         }}
         .chart-container img {{
             max-width: 100%;
             height: auto;
             border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }}
+        .chart-title {{
+            font-size: 1.2em;
+            font-weight: 700;
+            color: var(--color-primary);
+            margin: 0 0 16px;
         }}
         .table-container {{
             overflow-x: auto;
-            margin-bottom: 30px;
+            margin-bottom: 24px;
         }}
         table {{
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 20px;
-            font-size: 0.95em;
+            margin-bottom: 16px;
+            font-size: 0.9em;
         }}
         th {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: var(--color-primary);
             color: white;
-            padding: 15px 12px;
+            padding: 12px;
             text-align: left;
             font-weight: 600;
         }}
         td {{
-            padding: 12px;
-            border-bottom: 1px solid #ecf0f1;
-        }}
-        tr:hover {{
-            background-color: #f8f9fa;
+            padding: 11px 12px;
+            border-bottom: 1px solid var(--color-border);
         }}
         tr:nth-child(even) {{
-            background-color: #fafbfc;
+            background-color: #f8fafb;
         }}
         .bank-name {{
-            font-weight: bold;
-            color: #2c3e50;
-            background-color: #e8f4f8 !important;
+            font-weight: 700;
+            color: var(--color-primary);
+            background-color: var(--color-accent-light) !important;
+            border-left: 4px solid var(--color-accent);
         }}
         .timestamp {{
             text-align: center;
-            color: #7f8c8d;
-            font-size: 0.9em;
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 2px solid #ecf0f1;
+            color: var(--color-text-muted);
+            font-size: 0.85em;
+            margin-top: 28px;
+            padding-top: 18px;
+            border-top: 1px solid var(--color-border);
+        }}
+        @media (max-width: 768px) {{
+            body {{
+                padding: 5px;
+            }}
+            .container {{
+                padding: 10px;
+                border-radius: 0;
+                box-shadow: none;
+            }}
+            h1 {{
+                font-size: 1.4em;
+            }}
+            h2, .chart-title {{
+                font-size: 1.0em !important;
+            }}
+            .chart-container {{
+                padding: 12px;
+            }}
+            table {{
+                font-size: 11px;
+                min-width: 560px;
+            }}
+            th, td {{
+                padding: 8px 4px;
+                white-space: nowrap;
+            }}
         }}
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🏦 Consumer Loan Comparison</h1>
-        <div class="subtitle">Konsumkredit - Zinsentwicklung (Effektiver Zinssatz)</div>
-        
-        <a href="https://smartprototypes.net/Bank_market_overview/bank_comparison_consumer_loan.html" class="interactive-button" target="_blank" style="background-color: #667eea !important; color: white !important; text-decoration: none !important;">
-            🔗 Go to Interactive Version
+        <div class="subtitle">Konsumkredit - Sollzins-Entwicklung</div>
+
+        <a href="https://smartprototypes.net/Bank_market_overview/bank_comparison_consumer_loan.html" class="interactive-button" target="_blank">
+            🔗 Zu den interaktiven Charts
         </a>
-        
+
         <div class="chart-container">
-            <h2 style="color: #2c3e50; margin-bottom: 15px;">📊 Zinsentwicklung</h2>
+            <div class="chart-title">🏦 Konsumkredit Zinsentwicklung</div>
             <img src="data:image/png;base64,{png_base64}" alt="Consumer Loan Interest Rate Chart">
         </div>
-        
+
         <div class="table-container">
-            <h2 style="color: #2c3e50; margin-bottom: 20px;">📋 Aktuelle Konditionen</h2>
+            <h2>📋 Aktuelle Konditionen</h2>
             <table>
                 <thead>
                     <tr>

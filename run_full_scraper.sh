@@ -88,7 +88,7 @@ else
     echo "Step 2b: Updating SWAP/Euribor rates..."
     # Calculate date range: 12 months back to current month
     START_DATE=$(date -d "12 months ago" +%Y-%m)
-    END_DATE=$(date +%Y-%m)
+    END_DATE=$(date +%Y-%m-%d)
     python3 swap_data_fetcher.py --start "$START_DATE" --end "$END_DATE" --output swap_data.js
     SWAP_EXIT=$?
 

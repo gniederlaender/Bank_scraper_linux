@@ -111,6 +111,31 @@ return (function(chartId) {
 """
 
 
+_EPOCH_MS_MIN = 946684800000   # 2000-01-01
+_EPOCH_MS_MAX = 4102444800000  # 2100-01-01
+
+_MONTHS_DE = ['Jän', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun',
+              'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez']
+
+
+def _format_period_label(label: str) -> str:
+    """
+    Some charts (e.g. Highcharts true-datetime axes) don't expose a separate
+    text/hovertext/point.name label - the raw x value IS the period, encoded
+    as Unix epoch milliseconds (e.g. 1514764800000 == 2018-01-01). Detect that
+    case and format it as a human-readable month/year; otherwise return the
+    label unchanged (categorical index, quarter string, etc.).
+    """
+    stripped = label.strip()
+    if not stripped.lstrip('-').isdigit():
+        return label
+    value = int(stripped)
+    if not (_EPOCH_MS_MIN <= value <= _EPOCH_MS_MAX):
+        return label
+    dt = datetime.utcfromtimestamp(value / 1000)
+    return f"{_MONTHS_DE[dt.month - 1]} {dt.year}"
+
+
 def timeout_handler(signum, frame):
     """Signal handler for timeout"""
     raise TimeoutError("Operation timed out")
@@ -320,14 +345,15 @@ class OeNBNachfrageScraper:
         for trace in raw:
             xs = trace.get('x') or []
             ys = trace.get('y') or []
-            points = [(x, y) for x, y in zip(xs, ys) if y is not None]
+            points = [(_format_period_label(str(x)), y) for x, y in zip(xs, ys) if y is not None]
             if points:
                 series.append({'name': trace.get('name') or chart_id, 'points': points})
 
-        # Diagnostic: if every period label is purely numeric, we likely fell
-        # back to the raw x value instead of a real period label (trace.text/
-        # hovertext/point.name weren't found or didn't line up) - the chart's
-        # tooltip may use a different field name than the ones tried here.
+        # Diagnostic: if every period label is STILL purely numeric after
+        # _format_period_label (i.e. not a recognized epoch-ms timestamp
+        # either), we likely fell back to a raw categorical index instead of
+        # a real period label - the chart's tooltip may use a different
+        # field name than the ones tried in _CHART_DATA_JS.
         all_labels = [str(p[0]) for s in series for p in s['points']]
         if all_labels and all(label.strip().lstrip('-').isdigit() for label in all_labels):
             print(f"[WARN] Period labels for '{chart_id}' look purely numeric ({sorted(set(all_labels))[:5]}...) "

@@ -424,10 +424,19 @@ class AustrianBankScraper:
                     # Trigger events
                     kreditbetrag_input.send_keys(Keys.TAB)
                     time.sleep(2)
-                    # Verify the value was set
+                    # Verify the value was set. BAWAG's field reformats the
+                    # raw input into a currency string (e.g. "€10.000,00")
+                    # once it loses focus, so compare the parsed amount
+                    # rather than the raw string to avoid a false-positive
+                    # warning on every run.
                     current_value = kreditbetrag_input.get_attribute('value')
                     logger.info(f"Current Kreditbetrag input value: {current_value}")
-                    if current_value != '10000':
+                    parsed_value = None
+                    try:
+                        parsed_value = float(current_value.replace('€', '').strip().replace('.', '').replace(',', '.'))
+                    except (ValueError, AttributeError):
+                        pass
+                    if parsed_value != 10000:
                         logger.warning(f"Expected '10000' but got '{current_value}'")
                         # Try JavaScript method as fallback
                         self.driver.execute_script("arguments[0].value = '10000';", kreditbetrag_input)
@@ -762,65 +771,234 @@ class AustrianBankScraper:
                 # This is a heavy Webpack Module Federation SPA (a "container"
                 # app that lazy-loads a separate "workflow-manager" remote,
                 # which itself loads further chunks) - it needs much more than
-                # a flat few-second sleep to finish bootstrapping. Rather than
-                # trying to drive the calculator's amount/duration inputs
-                # (selectors we can't verify without seeing the live DOM), this
-                # follows the same approach that already works for Raiffeisen
-                # in this file: Austrian/EU consumer credit law requires a
-                # "repräsentatives Beispiel" (representative example) with
-                # Sollzinssatz/Effektivzinssatz/Kreditbetrag/etc. on every loan
-                # advertisement page by default, with no interaction needed, so
-                # we search for that block using the same broad selector +
-                # XPath text fallbacks and the bank's field_mapping.
+                # a flat few-second sleep to finish bootstrapping.
+                #
+                # Unlike Raiffeisen, Bank Austria does NOT show a static
+                # "repräsentatives Beispiel" by default - the page loads an
+                # interactive multi-step calculator instead (confirmed from a
+                # real production run: body text shows "VERZINSUNG WÄHLEN /
+                # FIXZINSSATZ / VARIABLER ZINSSATZ", a "Kreditbetrag" input, a
+                # custom "Laufzeit wählen" dropdown and a "Weiter" button, with
+                # no rates visible yet). So this drives the form the same way
+                # 10000 EUR / 60 months is used for the other banks in this
+                # file, then reads the resulting representative-example block
+                # with the same field_mapping-driven extraction as Raiffeisen.
+                #
+                # The exact DOM (element ids/classes/custom-component
+                # internals) could not be verified live in all environments,
+                # so every interaction step below is best-effort, XPath
+                # text-based (framework-agnostic) and individually wrapped so
+                # a single failed step doesn't abort the whole scrape - if a
+                # step fails, extraction still falls through to whatever state
+                # the page ended up in, and the failure screenshot/page-source
+                # dump below preserves real DOM for the next iteration.
                 logger.info(f"Scraping Bank Austria consumer loan page...")
 
                 sollzinssatz = effektiver_jahreszins = nettokreditbetrag = vertragslaufzeit = gesamtbetrag = monatliche_rate = None
                 min_betrag = max_betrag = min_laufzeit = max_laufzeit = None
                 page_text = ""
 
+                def _click_by_text(texts, extra_xpath=None, timeout=8):
+                    """Click the first clickable element whose visible text
+                    contains one of `texts` (case-sensitive, exact strings as
+                    seen in the log). Tries button/label/role=button/div/span,
+                    then any `extra_xpath` alternatives. Framework-agnostic."""
+                    candidates = []
+                    for t in texts:
+                        candidates += [
+                            f"//button[contains(., '{t}')]",
+                            f"//label[contains(., '{t}')]",
+                            f"//*[@role='button'][contains(., '{t}')]",
+                            f"//div[contains(., '{t}') and not(.//div[contains(., '{t}')])]",
+                            f"//span[contains(., '{t}')]",
+                        ]
+                    if extra_xpath:
+                        candidates += extra_xpath
+                    for xpath in candidates:
+                        try:
+                            el = WebDriverWait(self.driver, timeout / len(candidates)).until(
+                                EC.element_to_be_clickable((By.XPATH, xpath))
+                            )
+                            el.click()
+                            return xpath
+                        except Exception:
+                            continue
+                    return None
+
+                def _find_input_near_label(label_text):
+                    """Locate the <input> associated with a visible label,
+                    without relying on a known id/name/class."""
+                    xpaths = [
+                        f"//*[contains(text(), '{label_text}')]/following::input[1]",
+                        f"//*[contains(text(), '{label_text}')]/ancestor::*[position()<=3]//input[1]",
+                        f"//input[contains(@id, '{label_text.lower()}') or contains(@name, '{label_text.lower()}')]",
+                    ]
+                    for xpath in xpaths:
+                        try:
+                            elems = self.driver.find_elements(By.XPATH, xpath)
+                            if elems:
+                                return elems[0]
+                        except Exception:
+                            continue
+                    return None
+
+                def _fill_input(input_el, value):
+                    input_el.click()
+                    input_el.send_keys(Keys.CONTROL + "a")
+                    input_el.send_keys(Keys.DELETE)
+                    ActionChains(self.driver).send_keys(value).perform()
+                    input_el.send_keys(Keys.TAB)
+                    time.sleep(1)
+                    current = input_el.get_attribute('value')
+                    if current != value:
+                        self.driver.execute_script("arguments[0].value = arguments[1];", input_el, value)
+                        self.driver.execute_script("arguments[0].dispatchEvent(new Event('input', {bubbles: true}));", input_el)
+                        self.driver.execute_script("arguments[0].dispatchEvent(new Event('change', {bubbles: true}));", input_el)
+                    return input_el.get_attribute('value')
+
                 try:
                     # Give the module-federation bootstrap real time to finish
                     # instead of a flat sleep: wait for any of the expected
-                    # disclosure labels to show up in the rendered DOM.
+                    # calculator/disclosure labels to show up in the rendered DOM.
                     try:
                         WebDriverWait(self.driver, 45).until(
                             lambda d: any(
                                 term in d.find_element(By.TAG_NAME, "body").text
-                                for term in ("Sollzinssatz", "Effektivzinssatz", "Repräsentatives", "Kreditbetrag")
+                                for term in ("Sollzinssatz", "Effektivzinssatz", "Repräsentatives",
+                                             "Kreditbetrag", "FIXZINSSATZ")
                             )
                         )
                         logger.info("Bank Austria: page content detected")
                     except Exception as e:
-                        logger.warning(f"Bank Austria: representative-example text never appeared within 45s: {e}")
-                    time.sleep(3)  # let any late-arriving numbers settle
+                        logger.warning(f"Bank Austria: expected page content never appeared within 45s: {e}")
+                    time.sleep(2)  # let any late-arriving elements settle
 
-                    # Handle cookie banner - same best-effort approach as Raiffeisen
+                    # Handle cookie banner - a single quick existence check per
+                    # selector (no per-selector WebDriverWait) since the page
+                    # has already had 45s+2s to fully render by this point.
                     try:
                         cookie_selectors = [
-                            (By.XPATH, "//button[contains(text(), 'Zustimmen')]"),
-                            (By.XPATH, "//button[contains(text(), 'Akzeptieren')]"),
-                            (By.XPATH, "//button[contains(text(), 'Alle akzeptieren')]"),
                             (By.ID, "onetrust-accept-btn-handler"),
                             (By.CSS_SELECTOR, "[id*='cookie'][id*='accept']"),
                             (By.CSS_SELECTOR, "[class*='cookie'][class*='accept']"),
                             (By.CSS_SELECTOR, "[class*='consent'][class*='accept']"),
+                            (By.XPATH, "//button[contains(text(), 'Zustimmen')]"),
+                            (By.XPATH, "//button[contains(text(), 'Akzeptieren')]"),
+                            (By.XPATH, "//button[contains(text(), 'Alle akzeptieren')]"),
                         ]
                         for selector_type, selector_value in cookie_selectors:
                             try:
-                                cookie_button = WebDriverWait(self.driver, 3).until(
-                                    EC.element_to_be_clickable((selector_type, selector_value))
-                                )
-                                cookie_button.click()
-                                logger.info(f"Bank Austria: cookie banner accepted via {selector_type}, {selector_value}")
-                                time.sleep(2)
-                                break
+                                elems = self.driver.find_elements(selector_type, selector_value)
+                                if elems and elems[0].is_displayed():
+                                    elems[0].click()
+                                    logger.info(f"Bank Austria: cookie banner accepted via {selector_type}, {selector_value}")
+                                    time.sleep(1)
+                                    break
                             except Exception:
                                 continue
                     except Exception as e:
                         logger.warning(f"Bank Austria: error handling cookie banner (continuing anyway): {e}")
 
-                    # Try to find the representative-example element (same
-                    # selector strategy as Raiffeisen), fall back to whole body
+                    # Detect whether we're looking at the interactive
+                    # calculator (needs form-filling) or a static
+                    # representative example (rates already visible).
+                    body_text_now = self.driver.find_element(By.TAG_NAME, "body").text
+                    is_interactive_calculator = (
+                        "FIXZINSSATZ" in body_text_now
+                        and "Sollzinssatz" not in body_text_now
+                        and "Effektivzinssatz" not in body_text_now
+                    )
+
+                    if is_interactive_calculator:
+                        logger.info("Bank Austria: interactive calculator detected - driving form with Kreditbetrag=10000, Laufzeit=60 Monate")
+
+                        # 1) Select fixed-rate ("FIXZINSSATZ") so results are
+                        # directly comparable with the other banks' fix rates.
+                        clicked = _click_by_text(["FIXZINSSATZ"])
+                        if clicked:
+                            logger.info(f"Bank Austria: clicked FIXZINSSATZ via {clicked}")
+                            time.sleep(1)
+                        else:
+                            logger.warning("Bank Austria: could not find/click FIXZINSSATZ toggle")
+
+                        # 2) Kreditbetrag input
+                        try:
+                            betrag_input = _find_input_near_label("Kreditbetrag")
+                            if betrag_input:
+                                result = _fill_input(betrag_input, "10000")
+                                logger.info(f"Bank Austria: Kreditbetrag set to '{result}'")
+                            else:
+                                logger.warning("Bank Austria: could not locate Kreditbetrag input")
+                        except Exception as e:
+                            logger.warning(f"Bank Austria: could not set Kreditbetrag: {e}")
+
+                        # 3) Laufzeit - a custom dropdown/listbox component
+                        # (not a native <select>), per the "[object Object].
+                        # No value selected" text seen in production. Open it,
+                        # then pick the option matching 60/5 Jahre, falling
+                        # back to whatever option is available.
+                        try:
+                            opened = _click_by_text(
+                                ["Laufzeit wählen"],
+                                extra_xpath=["//*[contains(text(), 'Laufzeit')]/following::*[self::button or @role='combobox' or @role='listbox'][1]"]
+                            )
+                            if opened:
+                                logger.info(f"Bank Austria: opened Laufzeit dropdown via {opened}")
+                                time.sleep(1)
+                                option_xpaths = [
+                                    "//*[@role='option'][contains(., '60')]",
+                                    "//li[contains(., '60') and (contains(@class, 'option') or ancestor::*[@role='listbox'])]",
+                                    "//*[@role='option'][contains(., '5 Jahre')]",
+                                    "//*[@role='option'][1]",
+                                    "//li[contains(@class, 'option')][1]",
+                                ]
+                                option_clicked = False
+                                for xpath in option_xpaths:
+                                    try:
+                                        opt = WebDriverWait(self.driver, 2).until(
+                                            EC.element_to_be_clickable((By.XPATH, xpath))
+                                        )
+                                        opt.click()
+                                        logger.info(f"Bank Austria: selected Laufzeit option via {xpath}")
+                                        option_clicked = True
+                                        time.sleep(1)
+                                        break
+                                    except Exception:
+                                        continue
+                                if not option_clicked:
+                                    logger.warning("Bank Austria: Laufzeit dropdown opened but no option could be selected")
+                            else:
+                                logger.warning("Bank Austria: could not open Laufzeit dropdown")
+                        except Exception as e:
+                            logger.warning(f"Bank Austria: could not set Laufzeit: {e}")
+
+                        # 4) Advance to the results/representative-example step
+                        clicked_weiter = _click_by_text(["Weiter"])
+                        if clicked_weiter:
+                            logger.info(f"Bank Austria: clicked Weiter via {clicked_weiter}")
+                        else:
+                            logger.warning("Bank Austria: could not find/click Weiter button")
+
+                        # Give the next step time to render, then wait for
+                        # the representative-example rates to show up.
+                        try:
+                            WebDriverWait(self.driver, 20).until(
+                                lambda d: any(
+                                    term in d.find_element(By.TAG_NAME, "body").text
+                                    for term in ("Sollzinssatz", "Effektivzinssatz", "Repräsentatives")
+                                )
+                            )
+                            logger.info("Bank Austria: representative-example content detected after form submission")
+                        except Exception as e:
+                            logger.warning(f"Bank Austria: representative-example text never appeared after submitting form: {e}")
+                        time.sleep(2)
+                    else:
+                        logger.info("Bank Austria: representative-example text already present - skipping form interaction")
+
+                    # Find the representative-example element (same selector
+                    # strategy as Raiffeisen). Since the page has already had
+                    # ample time to render by this point, use quick existence
+                    # checks instead of a fresh WebDriverWait per selector.
                     element = None
                     selectors = [
                         '[class*="representative"]',
@@ -831,10 +1009,9 @@ class AustrianBankScraper:
                     ]
                     for selector in selectors:
                         try:
-                            element = WebDriverWait(self.driver, 5).until(
-                                EC.presence_of_element_located((By.CSS_SELECTOR, selector))
-                            )
-                            if element:
+                            elems = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                            if elems:
+                                element = elems[0]
                                 logger.info(f"Bank Austria: found element with selector: {selector}")
                                 break
                         except Exception:
@@ -848,12 +1025,11 @@ class AustrianBankScraper:
                         ]
                         for xpath in xpath_options:
                             try:
-                                text_element = WebDriverWait(self.driver, 5).until(
-                                    EC.presence_of_element_located((By.XPATH, xpath))
-                                )
-                                element = text_element.find_element(By.XPATH, "./ancestor::div[1] | ./ancestor::section[1]")
-                                logger.info(f"Bank Austria: found element using XPath text search: {xpath}")
-                                break
+                                text_elems = self.driver.find_elements(By.XPATH, xpath)
+                                if text_elems:
+                                    element = text_elems[0].find_element(By.XPATH, "./ancestor::div[1] | ./ancestor::section[1]")
+                                    logger.info(f"Bank Austria: found element using XPath text search: {xpath}")
+                                    break
                             except Exception:
                                 continue
 
@@ -960,7 +1136,7 @@ class AustrianBankScraper:
         cursor.execute('''
             INSERT INTO interest_rates (bank_name, product_name, rate, currency, date_scraped, source_url, nettokreditbetrag, gesamtbetrag, vertragslaufzeit, effektiver_jahreszins, monatliche_rate, min_betrag, max_betrag, min_laufzeit, max_laufzeit, full_text)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (bank_name, product_name, rate, currency, datetime.now(), source_url, nettokreditbetrag, gesamtbetrag, vertragslaufzeit, effektiver_jahreszins, monatliche_rate, min_betrag, max_betrag, min_laufzeit, max_laufzeit, full_text))
+        ''', (bank_name, product_name, rate, currency, datetime.now().isoformat(), source_url, nettokreditbetrag, gesamtbetrag, vertragslaufzeit, effektiver_jahreszins, monatliche_rate, min_betrag, max_betrag, min_laufzeit, max_laufzeit, full_text))
         conn.commit()
         conn.close()
 
