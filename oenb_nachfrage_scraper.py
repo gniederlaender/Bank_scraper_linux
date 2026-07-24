@@ -49,20 +49,35 @@ return (function(chartId) {
 
         // Strategy 1: Plotly htmlwidget - the container itself or a
         // descendant carries class 'js-plotly-plot' and a `.data` array.
+        // The raw x values are often just a sequential category index (not
+        // a real date/quarter) - the actual period label (e.g. "2026 Q1",
+        // "2025 H1") usually lives in the hover text instead, so prefer
+        // trace.text/trace.hovertext over String(x) whenever it's present
+        // and lines up 1:1 with the data points.
         var plotlyDiv = (el.classList && el.classList.contains('js-plotly-plot'))
             ? el : el.querySelector('.js-plotly-plot');
         if (plotlyDiv && plotlyDiv.data) {
             return plotlyDiv.data.map(function(trace) {
+                var xRaw = trace.x || [];
+                var labelSource = null;
+                if (Array.isArray(trace.text) && trace.text.length === xRaw.length) {
+                    labelSource = trace.text;
+                } else if (Array.isArray(trace.hovertext) && trace.hovertext.length === xRaw.length) {
+                    labelSource = trace.hovertext;
+                }
+                var x = labelSource ? labelSource.map(String) : xRaw.map(String);
                 return {
                     name: trace.name || '',
-                    x: (trace.x || []).map(String),
+                    x: x,
                     y: trace.y || []
                 };
             });
         }
 
         // Strategy 2: Highcharts - find the chart whose render target is
-        // this element (or is contained by it).
+        // this element (or is contained by it). Prefer each point's `name`
+        // (Highcharts' categorical/label field) over the raw x value, for
+        // the same reason as the Plotly branch above.
         if (window.Highcharts && Highcharts.charts) {
             for (var i = 0; i < Highcharts.charts.length; i++) {
                 var c = Highcharts.charts[i];
@@ -70,9 +85,17 @@ return (function(chartId) {
                     return c.series.map(function(s) {
                         var xData = s.xData || [];
                         var yData = s.yData || [];
+                        var points = s.data || [];
+                        var x = xData.map(function(xVal, idx) {
+                            var point = points[idx];
+                            if (point && point.name) {
+                                return String(point.name);
+                            }
+                            return String(xVal);
+                        });
                         return {
                             name: s.name || '',
-                            x: xData.map(String),
+                            x: x,
                             y: yData
                         };
                     });
@@ -300,6 +323,16 @@ class OeNBNachfrageScraper:
             points = [(x, y) for x, y in zip(xs, ys) if y is not None]
             if points:
                 series.append({'name': trace.get('name') or chart_id, 'points': points})
+
+        # Diagnostic: if every period label is purely numeric, we likely fell
+        # back to the raw x value instead of a real period label (trace.text/
+        # hovertext/point.name weren't found or didn't line up) - the chart's
+        # tooltip may use a different field name than the ones tried here.
+        all_labels = [str(p[0]) for s in series for p in s['points']]
+        if all_labels and all(label.strip().lstrip('-').isdigit() for label in all_labels):
+            print(f"[WARN] Period labels for '{chart_id}' look purely numeric ({sorted(set(all_labels))[:5]}...) "
+                  f"- likely couldn't find real period text on this chart. Check the chart's tooltip/hover "
+                  f"markup in browser devtools for the actual field name and extend _CHART_DATA_JS.")
 
         return series or None
 
