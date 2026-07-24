@@ -297,8 +297,9 @@ def generate_interactive_chart():
         print("[WARN] No data available for chart generation")
         return None, []
     
-    # Convert timestamp to datetime
-    df['scrape_timestamp'] = pd.to_datetime(df['scrape_timestamp'])
+    # Convert timestamp to datetime. format='mixed' guards against rows
+    # written with inconsistent separators crashing the whole report.
+    df['scrape_timestamp'] = pd.to_datetime(df['scrape_timestamp'], format='mixed')
     
     # Colors for each Fixierung variation (years)
     colors = FIXIERUNG_COLORS

@@ -798,6 +798,20 @@ class AustrianBankScraper:
                 min_betrag = max_betrag = min_laufzeit = max_laufzeit = None
                 page_text = ""
 
+                def _safe_click(el):
+                    """Click an element, falling back to a JS click if
+                    Selenium's native click is blocked by an overlapping
+                    element - Bank Austria's form fields are Ant Design
+                    components (confirmed from production: id="duration",
+                    class "ant-select-selection-search-input"), whose
+                    underlying <input> is visually covered by the styled
+                    selector box that sits on top of it, so a normal click
+                    at the input's coordinates gets intercepted."""
+                    try:
+                        el.click()
+                    except Exception:
+                        self.driver.execute_script("arguments[0].click();", el)
+
                 def _click_by_text(texts, extra_xpath=None, timeout=8):
                     """Click the first clickable element whose visible text
                     contains one of `texts` (case-sensitive, exact strings as
@@ -819,23 +833,32 @@ class AustrianBankScraper:
                             el = WebDriverWait(self.driver, timeout / len(candidates)).until(
                                 EC.element_to_be_clickable((By.XPATH, xpath))
                             )
-                            el.click()
+                            _safe_click(el)
                             return xpath
                         except Exception:
                             continue
                     return None
 
-                def _find_input_near_label(label_text):
+                def _find_input_near_label(label_text, exclude_id_substrings=()):
                     """Locate the <input> associated with a visible label,
-                    without relying on a known id/name/class."""
+                    without relying on a known id/name/class. Bank Austria's
+                    Laufzeit field (id="duration") sits right after the
+                    Kreditbetrag label in document order, so a plain
+                    "following::input[1]" search can skip past Kreditbetrag's
+                    own field and grab the wrong one - exclude_id_substrings
+                    filters those out."""
+                    def _excluded(el):
+                        el_id = (el.get_attribute('id') or '').lower()
+                        return any(sub in el_id for sub in exclude_id_substrings)
+
                     xpaths = [
-                        f"//*[contains(text(), '{label_text}')]/following::input[1]",
-                        f"//*[contains(text(), '{label_text}')]/ancestor::*[position()<=3]//input[1]",
+                        f"//*[contains(text(), '{label_text}')]/ancestor::*[position()<=3]//input",
+                        f"//*[contains(text(), '{label_text}')]/following::input",
                         f"//input[contains(@id, '{label_text.lower()}') or contains(@name, '{label_text.lower()}')]",
                     ]
                     for xpath in xpaths:
                         try:
-                            elems = self.driver.find_elements(By.XPATH, xpath)
+                            elems = [e for e in self.driver.find_elements(By.XPATH, xpath) if not _excluded(e)]
                             if elems:
                                 return elems[0]
                         except Exception:
@@ -843,7 +866,7 @@ class AustrianBankScraper:
                     return None
 
                 def _fill_input(input_el, value):
-                    input_el.click()
+                    _safe_click(input_el)
                     input_el.send_keys(Keys.CONTROL + "a")
                     input_el.send_keys(Keys.DELETE)
                     ActionChains(self.driver).send_keys(value).perform()
@@ -921,9 +944,11 @@ class AustrianBankScraper:
                         else:
                             logger.warning("Bank Austria: could not find/click FIXZINSSATZ toggle")
 
-                        # 2) Kreditbetrag input
+                        # 2) Kreditbetrag input. Exclude the Laufzeit field
+                        # (id="duration", confirmed from production) so a
+                        # document-order search doesn't grab the wrong input.
                         try:
-                            betrag_input = _find_input_near_label("Kreditbetrag")
+                            betrag_input = _find_input_near_label("Kreditbetrag", exclude_id_substrings=("duration",))
                             if betrag_input:
                                 result = _fill_input(betrag_input, "10000")
                                 logger.info(f"Bank Austria: Kreditbetrag set to '{result}'")
@@ -932,23 +957,48 @@ class AustrianBankScraper:
                         except Exception as e:
                             logger.warning(f"Bank Austria: could not set Kreditbetrag: {e}")
 
-                        # 3) Laufzeit - a custom dropdown/listbox component
-                        # (not a native <select>), per the "[object Object].
-                        # No value selected" text seen in production. Open it,
-                        # then pick the option matching 60/5 Jahre, falling
-                        # back to whatever option is available.
+                        # 3) Laufzeit - confirmed from production to be an Ant
+                        # Design Select (id="duration", class
+                        # "ant-select-selection-search-input"). Ant renders a
+                        # hidden/search <input> that's visually covered by the
+                        # styled ".ant-select-selector" box sitting on top of
+                        # it, so clicking the input directly gets intercepted
+                        # ("not clickable ... another element <div> obscures
+                        # it") - click the visible selector wrapper instead.
                         try:
-                            opened = _click_by_text(
-                                ["Laufzeit wählen"],
-                                extra_xpath=["//*[contains(text(), 'Laufzeit')]/following::*[self::button or @role='combobox' or @role='listbox'][1]"]
-                            )
+                            duration_inputs = self.driver.find_elements(By.CSS_SELECTOR, "#duration, input[id*='duration']")
+                            trigger = None
+                            if duration_inputs:
+                                try:
+                                    trigger = duration_inputs[0].find_element(
+                                        By.XPATH, "./ancestor::*[contains(@class, 'ant-select')][1]"
+                                    )
+                                except Exception:
+                                    trigger = duration_inputs[0]
+
+                            opened = False
+                            if trigger:
+                                _safe_click(trigger)
+                                opened = True
+                                logger.info("Bank Austria: opened Laufzeit dropdown via Ant Select wrapper for #duration")
+                            else:
+                                opened_xpath = _click_by_text(
+                                    ["Laufzeit wählen"],
+                                    extra_xpath=["//*[contains(text(), 'Laufzeit')]/following::*[self::button or @role='combobox' or @role='listbox'][1]"]
+                                )
+                                if opened_xpath:
+                                    opened = True
+                                    logger.info(f"Bank Austria: opened Laufzeit dropdown via {opened_xpath}")
+
                             if opened:
-                                logger.info(f"Bank Austria: opened Laufzeit dropdown via {opened}")
                                 time.sleep(1)
                                 option_xpaths = [
+                                    "//*[contains(@class, 'ant-select-item-option')][contains(., '60')]",
                                     "//*[@role='option'][contains(., '60')]",
                                     "//li[contains(., '60') and (contains(@class, 'option') or ancestor::*[@role='listbox'])]",
+                                    "//*[contains(@class, 'ant-select-item-option')][contains(., '5 Jahre')]",
                                     "//*[@role='option'][contains(., '5 Jahre')]",
+                                    "//*[contains(@class, 'ant-select-item-option')][1]",
                                     "//*[@role='option'][1]",
                                     "//li[contains(@class, 'option')][1]",
                                 ]
@@ -956,9 +1006,9 @@ class AustrianBankScraper:
                                 for xpath in option_xpaths:
                                     try:
                                         opt = WebDriverWait(self.driver, 2).until(
-                                            EC.element_to_be_clickable((By.XPATH, xpath))
+                                            EC.presence_of_element_located((By.XPATH, xpath))
                                         )
-                                        opt.click()
+                                        _safe_click(opt)
                                         logger.info(f"Bank Austria: selected Laufzeit option via {xpath}")
                                         option_clicked = True
                                         time.sleep(1)
@@ -1136,7 +1186,7 @@ class AustrianBankScraper:
         cursor.execute('''
             INSERT INTO interest_rates (bank_name, product_name, rate, currency, date_scraped, source_url, nettokreditbetrag, gesamtbetrag, vertragslaufzeit, effektiver_jahreszins, monatliche_rate, min_betrag, max_betrag, min_laufzeit, max_laufzeit, full_text)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (bank_name, product_name, rate, currency, datetime.now().isoformat(), source_url, nettokreditbetrag, gesamtbetrag, vertragslaufzeit, effektiver_jahreszins, monatliche_rate, min_betrag, max_betrag, min_laufzeit, max_laufzeit, full_text))
+        ''', (bank_name, product_name, rate, currency, datetime.now().isoformat(sep=' '), source_url, nettokreditbetrag, gesamtbetrag, vertragslaufzeit, effektiver_jahreszins, monatliche_rate, min_betrag, max_betrag, min_laufzeit, max_laufzeit, full_text))
         conn.commit()
         conn.close()
 
@@ -1185,7 +1235,9 @@ class AustrianBankScraper:
             """
             
             df = pd.read_sql_query(query, conn)
-            df['date_scraped'] = pd.to_datetime(df['date_scraped'])
+            # format='mixed' guards against rows written with inconsistent
+            # separators crashing chart generation.
+            df['date_scraped'] = pd.to_datetime(df['date_scraped'], format='mixed')
             
             if df.empty:
                 logger.warning("No data available for chart generation")

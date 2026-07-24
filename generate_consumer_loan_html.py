@@ -70,8 +70,12 @@ def generate_interactive_chart():
         print("[WARN] No data available for chart generation")
         return None, []
     
-    # Convert timestamp to datetime
-    df['date_scraped'] = pd.to_datetime(df['date_scraped'])
+    # Convert timestamp to datetime. format='mixed' guards against rows
+    # written with different separators (e.g. a period where date_scraped
+    # was stored via datetime.isoformat()'s "T" separator instead of the
+    # historical "YYYY-MM-DD HH:MM:SS.ffffff" space-separated format) so one
+    # inconsistent row can't crash the whole report.
+    df['date_scraped'] = pd.to_datetime(df['date_scraped'], format='mixed')
     
     # Colors for each bank - modern, distinguishable palette
     colors = {
