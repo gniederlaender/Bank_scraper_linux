@@ -172,7 +172,7 @@ def generate_interactive_chart():
             gridcolor=COLOR_GRID
         ),
         hovermode='closest',
-        hoverlabel=dict(font=dict(family=PLOTLY_FONT, size=13), bgcolor='white', bordercolor=COLOR_GRID),
+        hoverlabel=dict(font=dict(family=PLOTLY_FONT, size=13, color=COLOR_TEXT), bgcolor='white', bordercolor=COLOR_GRID),
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
         font=dict(family=PLOTLY_FONT, size=13, color=COLOR_TEXT),
