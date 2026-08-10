@@ -871,7 +871,7 @@ def generate_static_png_chart(df, fixierung_values, laufzeit_values, colors):
     plt.title(f'Wohnkredit Zinsentwicklung - 25J Laufzeit ({date_from} - {date_to})',
               fontsize=16, fontweight='bold', pad=15)
     plt.xlabel('Datum', fontsize=12, fontweight='bold')
-    plt.ylabel('Sollzins (%)', fontsize=12, fontweight='bold')
+    plt.ylabel('Effektiver Zinssatz (%)', fontsize=12, fontweight='bold')
     
     # Format x-axis
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d.%m.%Y'))
