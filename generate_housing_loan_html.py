@@ -20,6 +20,12 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 from db_helper import get_all_loan_offers, get_latest_oenb_table_data
+from competitor_trend_charts import (
+    generate_competitor_sollzins_chart,
+    generate_competitor_effektivzins_chart,
+    generate_static_png_competitor_sollzins,
+    generate_static_png_competitor_effektivzins
+)
 import glob
 
 # Try to load dotenv if available
@@ -521,6 +527,137 @@ def generate_lowest_offers_table_html(user_offers, days: int = 30) -> str:
                     </tbody>
                 </table>
             </div>'''
+
+
+def generate_competitor_trend_charts_html(
+    sollzins_chart_html,
+    sollzins_fixierung_values,
+    sollzins_table_html,
+    effektivzins_chart_html,
+    effektivzins_fixierung_values,
+    effektivzins_table_html,
+    lowest_offers_table_html
+):
+    """
+    Generate HTML for the two new competitor trend charts (Sollzins and Effektivzins).
+    Replaces the old individual offers chart.
+    """
+    return f'''
+        <!-- Sollzinssatz Trend Chart (NEW) -->
+        <div class="chart-container" style="margin-top: 40px;">
+            <div class="chart-title">📊 Sollzinssatz Konkurrenzangebote - Zeitverlauf</div>
+            <details class="filters-accordion">
+                <summary>🔧 Filter</summary>
+                <div class="accordion-body">
+                <div class="chart-controls">
+                <div class="control-group">
+                    <span class="control-label">Fixlaufzeit:</span>
+                    <select id="sollzins-fixierung-filter">
+                        <option value="all">Alle Fixlaufzeiten</option>
+{''.join([f'                        <option value="{fx}"{"selected" if fx == 10 else ""}>{fx} Jahre</option>\n' for fx in sollzins_fixierung_values])}                    </select>
+                </div>
+                </div>
+                </div>
+            </details>
+
+            {sollzins_chart_html if sollzins_chart_html else '<p style="text-align: center; color: var(--color-text-muted); padding: 40px;">Keine Daten verfügbar</p>'}
+
+            <script>
+                // Filter logic for Sollzins chart
+                function applySollzinsFilter() {{
+                    const chartDiv = document.getElementById('plotly-competitor-sollzins-chart');
+                    if (!chartDiv || !chartDiv.data) return;
+
+                    const filterValue = document.getElementById('sollzins-fixierung-filter').value;
+                    const visible = [];
+
+                    for (let i = 0; i < chartDiv.data.length; i++) {{
+                        const trace = chartDiv.data[i];
+                        if (!trace.customdata || trace.customdata.length === 0) {{
+                            visible.push(true);
+                            continue;
+                        }}
+
+                        const fixierung = trace.customdata[0][0];
+                        if (filterValue === 'all') {{
+                            visible.push(true);
+                        }} else {{
+                            visible.push(fixierung === parseInt(filterValue));
+                        }}
+                    }}
+
+                    Plotly.restyle('plotly-competitor-sollzins-chart', {{'visible': visible}});
+                }}
+
+                if (document.getElementById('sollzins-fixierung-filter')) {{
+                    document.getElementById('sollzins-fixierung-filter').addEventListener('change', applySollzinsFilter);
+                }}
+
+                setTimeout(() => {{
+                    applySollzinsFilter();
+                }}, 1500);
+            </script>
+{sollzins_table_html}
+        </div>
+
+        <!-- Effektivzinssatz Trend Chart (NEW) -->
+        <div class="chart-container" style="margin-top: 40px;">
+            <div class="chart-title">📈 Effektivzinssatz Konkurrenzangebote - Zeitverlauf</div>
+            <details class="filters-accordion">
+                <summary>🔧 Filter</summary>
+                <div class="accordion-body">
+                <div class="chart-controls">
+                <div class="control-group">
+                    <span class="control-label">Fixlaufzeit:</span>
+                    <select id="effektivzins-fixierung-filter">
+                        <option value="all">Alle Fixlaufzeiten</option>
+{''.join([f'                        <option value="{fx}"{"selected" if fx == 10 else ""}>{fx} Jahre</option>\n' for fx in effektivzins_fixierung_values])}                    </select>
+                </div>
+                </div>
+                </div>
+            </details>
+
+            {effektivzins_chart_html if effektivzins_chart_html else '<p style="text-align: center; color: var(--color-text-muted); padding: 40px;">Keine Daten verfügbar</p>'}
+
+            <script>
+                // Filter logic for Effektivzins chart
+                function applyEffektivzinsFilter() {{
+                    const chartDiv = document.getElementById('plotly-competitor-effektivzins-chart');
+                    if (!chartDiv || !chartDiv.data) return;
+
+                    const filterValue = document.getElementById('effektivzins-fixierung-filter').value;
+                    const visible = [];
+
+                    for (let i = 0; i < chartDiv.data.length; i++) {{
+                        const trace = chartDiv.data[i];
+                        if (!trace.customdata || trace.customdata.length === 0) {{
+                            visible.push(true);
+                            continue;
+                        }}
+
+                        const fixierung = trace.customdata[0][0];
+                        if (filterValue === 'all') {{
+                            visible.push(true);
+                        }} else {{
+                            visible.push(fixierung === parseInt(filterValue));
+                        }}
+                    }}
+
+                    Plotly.restyle('plotly-competitor-effektivzins-chart', {{'visible': visible}});
+                }}
+
+                if (document.getElementById('effektivzins-fixierung-filter')) {{
+                    document.getElementById('effektivzins-fixierung-filter').addEventListener('change', applyEffektivzinsFilter);
+                }}
+
+                setTimeout(() => {{
+                    applyEffektivzinsFilter();
+                }}, 1500);
+            </script>
+{effektivzins_table_html}
+{lowest_offers_table_html}
+        </div>
+'''
 
 
 def generate_individual_offers_chart():
@@ -1195,14 +1332,21 @@ def generate_swap_rates_chart():
             print(f"[WARN] Could not generate SWAP rates PNG: {e}")
             png_base64 = None
 
-        return chart_html, maturities_present, png_base64
+        # Generate table for last 5 months (10Y)
+        try:
+            table_html = generate_swap_10y_table_html(rate_data)
+        except Exception as e:
+            print(f"[WARN] Could not generate SWAP table: {e}")
+            table_html = ''
+
+        return chart_html, maturities_present, png_base64, table_html
 
     except ImportError as e:
         print(f"[WARN] swap_data_fetcher not available: {e}")
-        return None, [], None
+        return None, [], None, ''
     except Exception as e:
         print(f"[WARN] Error generating SWAP rates chart: {e}")
-        return None, [], None
+        return None, [], None, ''
 
 
 def generate_euribor_chart():
@@ -1324,15 +1468,9 @@ def generate_euribor_chart():
 
 
 def generate_static_png_swap_rates(rate_data):
-    """Generate static PNG chart for SWAP rates using matplotlib"""
+    """Generate static PNG chart for SWAP rates using matplotlib (10Y only for email)"""
     dates = []
-    swap_data_by_maturity = {
-        '5Y': [],
-        '10Y': [],
-        '15Y': [],
-        '20Y': [],
-        '25Y': []
-    }
+    swap_10y = []
 
     for day_data in rate_data:
         # Use the 'date' field (ISO format: YYYY-MM-DD)
@@ -1342,31 +1480,21 @@ def generate_static_png_swap_rates(rate_data):
             dates.append(dt)
 
         rates = day_data.get('rates', {})
-        for maturity in swap_data_by_maturity.keys():
-            if maturity in rates:
-                swap_data_by_maturity[maturity].append(rates[maturity])
-            else:
-                swap_data_by_maturity[maturity].append(None)
-    
+        if '10Y' in rates:
+            swap_10y.append(rates['10Y'])
+        else:
+            swap_10y.append(None)
+
     fig, ax = plt.subplots(figsize=(14, 8))
-    
-    colors = {
-        '5Y': '#1f77b4',
-        '10Y': '#2ca02c',
-        '15Y': '#ff7f0e',
-        '20Y': '#d62728',
-        '25Y': '#9467bd'
-    }
-    
-    for maturity in ['5Y', '10Y', '15Y', '20Y', '25Y']:
-        values = swap_data_by_maturity[maturity]
-        if any(v is not None for v in values):
-            ax.plot(dates, values, label=f'{maturity} SWAP', color=colors[maturity], 
-                   linewidth=2.5, marker='o', markersize=4)
-    
+
+    # Only plot 10Y line
+    if any(v is not None for v in swap_10y):
+        ax.plot(dates, swap_10y, label='10Y SWAP', color='#2ca02c',
+               linewidth=2.5, marker='o', markersize=4)
+
     ax.set_xlabel('Datum', fontsize=12, fontfamily='Arial')
     ax.set_ylabel('Zinssatz (%)', fontsize=12, fontfamily='Arial')
-    ax.set_title('EUR SWAP Rates', fontsize=16, fontweight='bold', fontfamily='Arial', pad=20)
+    ax.set_title('EUR SWAP Rates (10 Jahre)', fontsize=16, fontweight='bold', fontfamily='Arial', pad=20)
     ax.grid(True, alpha=0.3, linestyle='--')
     ax.legend(loc='best', fontsize=10)
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%d.%m.%Y'))
@@ -1383,6 +1511,94 @@ def generate_static_png_swap_rates(rate_data):
     plt.close(fig)
     
     return f"data:image/png;base64,{img_base64}"
+
+
+def generate_swap_10y_table_html(rate_data):
+    """
+    Generate HTML table for last 5 months of 10Y SWAP rates.
+
+    Args:
+        rate_data: List of daily rate data from swap_data_fetcher
+
+    Returns:
+        HTML string for the table
+    """
+    if not rate_data:
+        return '<p style="text-align: center; color: #666; padding: 20px;">Keine Daten verfügbar</p>'
+
+    # Group by month and calculate average for each month
+    from collections import defaultdict
+    monthly_data = defaultdict(list)
+
+    for day_data in rate_data:
+        date_str = day_data.get('date')
+        if not date_str:
+            continue
+
+        try:
+            dt = datetime.strptime(date_str, '%Y-%m')
+            month_key = dt.strftime('%Y-%m')
+        except:
+            try:
+                dt = datetime.strptime(date_str, '%Y-%m-%d')
+                month_key = dt.strftime('%Y-%m')
+            except:
+                continue
+
+        rates = day_data.get('rates', {})
+        if '10Y' in rates and rates['10Y'] is not None:
+            monthly_data[month_key].append(rates['10Y'])
+
+    # Calculate monthly averages
+    monthly_avg = []
+    for month in sorted(monthly_data.keys()):
+        values = monthly_data[month]
+        if values:
+            avg = sum(values) / len(values)
+            monthly_avg.append({
+                'month': month,
+                'avg': avg
+            })
+
+    # Get last 5 months
+    last_5 = monthly_avg[-5:] if len(monthly_avg) >= 5 else monthly_avg
+
+    if not last_5:
+        return '<p style="text-align: center; color: #666; padding: 20px;">Keine Daten verfügbar</p>'
+
+    # Format month names
+    def format_month(month_str):
+        try:
+            dt = datetime.strptime(month_str, '%Y-%m')
+            month_names = ['Jän', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun',
+                          'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez']
+            return f"{month_names[dt.month-1]} {dt.year}"
+        except:
+            return month_str
+
+    rows_html = '\n'.join([
+        f'''                        <tr>
+                            <td style="padding: 12px; text-align: left; border-bottom: 1px solid #eee;">{format_month(item['month'])}</td>
+                            <td style="padding: 12px; text-align: left; border-bottom: 1px solid #eee;">{item['avg']:.3f}%</td>
+                        </tr>'''
+        for item in last_5
+    ])
+
+    return f'''
+            <div class="table-container" style="margin-top: 24px;">
+                <h3 style="margin-bottom: 16px; font-size: 16px; color: #1b2733;">📊 Entwicklung letzte 5 Monate - EUR SWAP Rates (10 Jahre)</h3>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background-color: #f5f5f5;">
+                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Monat</th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Durchschnitt</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+{rows_html}
+                    </tbody>
+                </table>
+            </div>'''
 
 
 def generate_static_png_euribor(rate_data):
@@ -1430,7 +1646,7 @@ def generate_static_png_euribor(rate_data):
 
 
 def generate_swap_euribor_section_html(swap_chart_html, euribor_chart_html, swap_png_base64, euribor_png_base64,
-                                        for_email=False, swap_maturities=None):
+                                        for_email=False, swap_maturities=None, swap_table_html=''):
     """Generate HTML section for SWAP/Euribor charts
 
     Args:
@@ -1442,6 +1658,7 @@ def generate_swap_euribor_section_html(swap_chart_html, euribor_chart_html, swap
         swap_maturities: list of maturity labels (e.g. ['5Y', '10Y', ...]) present
             as traces in swap_chart_html, in trace order - used to build the
             segmented pill selector that shows one maturity at a time
+        swap_table_html: HTML table for last 5 months of 10Y SWAP rates
     """
     if not swap_chart_html and not euribor_chart_html:
         return ""
@@ -1460,6 +1677,7 @@ def generate_swap_euribor_section_html(swap_chart_html, euribor_chart_html, swap
             <div class="chart-container">
                 <div class="chart-title">EUR SWAP Rates</div>
                 <img src="{swap_png_base64}" alt="EUR SWAP Rates" style="width: 100%; max-width: 1400px; height: auto; border-radius: 8px;" />
+                {swap_table_html}
             </div>
 '''
         if euribor_png_base64:
@@ -1494,6 +1712,7 @@ def generate_swap_euribor_section_html(swap_chart_html, euribor_chart_html, swap
                         }});
                     }}
                 </script>
+                {swap_table_html}
             </div>
 '''
         if euribor_chart_html:
@@ -1604,19 +1823,37 @@ def generate_html():
         print("[WARN] No data found in database")
         return False, None
     
-    # Generate individual offers chart
-    individual_chart_result = generate_individual_offers_chart()
-    if individual_chart_result[0]:
-        individual_chart_html, individual_laufzeit_values, individual_fixierung_values, individual_trace_metadata, individual_png_base64 = individual_chart_result
-    else:
-        individual_chart_html = None
-        individual_laufzeit_values = []
-        individual_fixierung_values = []
-        individual_trace_metadata = []
-        individual_png_base64 = None
+    # Generate competitor trend charts (NEW: replaces individual offers chart)
+    print("[INFO] Generating competitor trend charts...")
+    try:
+        sollzins_chart_html, sollzins_fixierung_values, sollzins_data, sollzins_table_html = generate_competitor_sollzins_chart(
+            DB_PATH, PLOTLY_FONT, COLOR_PRIMARY, COLOR_ACCENT, COLOR_TEXT, COLOR_GRID
+        )
+        effektivzins_chart_html, effektivzins_fixierung_values, effektivzins_data, effektivzins_table_html = generate_competitor_effektivzins_chart(
+            DB_PATH, PLOTLY_FONT, COLOR_PRIMARY, COLOR_ACCENT, COLOR_TEXT, COLOR_GRID
+        )
+
+        # Generate PNG versions for email
+        sollzins_png_base64 = generate_static_png_competitor_sollzins(sollzins_data) if sollzins_data else None
+        effektivzins_png_base64 = generate_static_png_competitor_effektivzins(effektivzins_data) if effektivzins_data else None
+
+        print(f"[INFO] Sollzins chart: {sollzins_chart_html is not None}, PNG: {sollzins_png_base64 is not None}")
+        print(f"[INFO] Effektivzins chart: {effektivzins_chart_html is not None}, PNG: {effektivzins_png_base64 is not None}")
+    except Exception as e:
+        print(f"[ERROR] Failed to generate competitor trend charts: {e}")
+        import traceback
+        traceback.print_exc()
+        sollzins_chart_html = None
+        sollzins_fixierung_values = []
+        sollzins_png_base64 = None
+        sollzins_table_html = ''
+        effektivzins_chart_html = None
+        effektivzins_fixierung_values = []
+        effektivzins_png_base64 = None
+        effektivzins_table_html = ''
 
     # Lowest Sollzins per bank in the last 30 days, for the table under the
-    # Konkurrenzangebote chart
+    # competitor charts
     try:
         lowest_offers_table_html = generate_lowest_offers_table_html(get_all_loan_offers(), days=30)
     except Exception as e:
@@ -1635,9 +1872,9 @@ def generate_html():
     euribor_chart_result = generate_euribor_chart()
 
     if swap_chart_result[0]:
-        swap_chart_html, swap_maturities, swap_png_base64 = swap_chart_result
+        swap_chart_html, swap_maturities, swap_png_base64, swap_table_html = swap_chart_result
     else:
-        swap_chart_html, swap_maturities, swap_png_base64 = None, [], None
+        swap_chart_html, swap_maturities, swap_png_base64, swap_table_html = None, [], None, ''
 
     if euribor_chart_result[0]:
         euribor_chart_html, euribor_png_base64 = euribor_chart_result
@@ -2370,167 +2607,16 @@ def generate_html():
             </script>
         </div>
         
-{f'''
-        <div class="chart-container" style="margin-top: 40px;">
-            <div class="chart-title">💳 Wohnkredite - Konkurrenzangebote</div>
-            <details class="filters-accordion">
-                <summary>🔧 Filter &amp; Anzeige</summary>
-                <div class="accordion-body">
-                <div class="chart-controls">
-                <div class="control-group">
-                    <span class="control-label">Laufzeit:</span>
-                    <select id="individual-laufzeit-filter">
-                        <option value="all">Alle Laufzeiten</option>
-{f''.join([f'                        <option value="{lz}">{lz} Jahre</option>\n' for lz in individual_laufzeit_values])}                    </select>
-                </div>
-                <div class="control-group">
-                    <span class="control-label">Fixlaufzeit:</span>
-                    <select id="individual-fixierung-filter">
-                        <option value="all">Alle Fixlaufzeiten</option>
-{f''.join([f'                        <option value="{fx}">{fx} Jahre</option>\n' for fx in individual_fixierung_values])}                    </select>
-                </div>
-                <div class="control-group segmented">
-                    <span class="control-label">Anzeigen:</span>
-                    <div class="segmented-control">
-                        <button id="individual-btn-beide" onclick="setIndividualZinssatzFilter('beide')">Beide</button>
-                        <button id="individual-btn-zinssatz" class="active" onclick="setIndividualZinssatzFilter('zinssatz')">Nur Sollzins</button>
-                        <button id="individual-btn-effektiver" onclick="setIndividualZinssatzFilter('effektiver')">Nur Eff. Zinssatz</button>
-                    </div>
-                </div>
-                </div>
-                </div>
-            </details>
 
-            {individual_chart_html if individual_chart_html else '<p style="text-align: center; color: var(--color-text-muted); padding: 40px;">Keine Konkurrenzangebote verfügbar</p>'}
-
-            <script>
-                // Store trace metadata for individual offers chart
-                const individualTraceMetadata = {json.dumps(individual_trace_metadata) if individual_chart_html else '[]'};
-                
-                // Current filter states for individual offers chart
-                let individualCurrentLaufzeit = 'all';
-                let individualCurrentFixierung = 'all';
-                let individualCurrentZinssatz = 'zinssatz';
-                
-                // Apply filters for individual offers chart
-                function applyIndividualFilters() {{
-                    if (!document.getElementById('plotly-individual-offers-chart')) {{
-                        return;
-                    }}
-                    
-                    const data = document.getElementById('plotly-individual-offers-chart').data;
-                    
-                    const visible = [];
-                    
-                    for (let i = 0; i < individualTraceMetadata.length && i < data.length; i++) {{
-                        const meta = individualTraceMetadata[i];
-                        
-                        // Check Laufzeit filter
-                        const laufzeitMatch = individualCurrentLaufzeit === 'all' || 
-                            (meta.laufzeit !== null && meta.laufzeit === parseInt(individualCurrentLaufzeit));
-                        
-                        // Check Fixierung filter
-                        const fixierungMatch = individualCurrentFixierung === 'all' || 
-                            (meta.fixierung !== null && meta.fixierung === parseFloat(individualCurrentFixierung));
-                        
-                        // Check Zinssatz type filter
-                        let zinssatzMatch = true;
-                        if (individualCurrentZinssatz === 'zinssatz') {{
-                            zinssatzMatch = meta.type === 'user_offer_fix';
-                        }} else if (individualCurrentZinssatz === 'effektiver') {{
-                            zinssatzMatch = meta.type === 'user_offer_eff';
-                        }}
-                        // 'beide' means both are shown, so zinssatzMatch stays true
-                        
-                        // Return true only if ALL conditions match (AND logic)
-                        visible.push(laufzeitMatch && fixierungMatch && zinssatzMatch);
-                    }}
-                    
-                    // Update the Plotly chart
-                    Plotly.restyle('plotly-individual-offers-chart', {{'visible': visible}});
-                }}
-                
-                // Mobile responsiveness for individual offers Plotly chart (same approach as Durchblicker chart)
-                function handleIndividualChartResize() {{
-                    const chartDiv = document.getElementById('plotly-individual-offers-chart');
-                    if (chartDiv && chartDiv.data) {{
-                        const isMobile = window.innerWidth <= 768;
-                        const isSmallMobile = window.innerWidth <= 480;
-                        
-                        let newHeight = 600;
-                        let newMargin = {{l: 80, r: 280, t: 80, b: 80}};
-                        let showLegend = true;
-                        
-                        if (isSmallMobile) {{
-                            newHeight = 300;
-                            newMargin = {{l: 50, r: 50, t: 60, b: 60}};
-                            showLegend = false;
-                        }} else if (isMobile) {{
-                            newHeight = 400;
-                            newMargin = {{l: 60, r: 60, t: 70, b: 70}};
-                            showLegend = false;
-                        }}
-                        
-                        Plotly.relayout('plotly-individual-offers-chart', {{
-                            height: newHeight,
-                            margin: newMargin,
-                            showlegend: showLegend
-                        }});
-                        // Same fix as the main chart's handleResize: the outer
-                        // wrapper div from fig.to_html() has a static inline
-                        // height that Plotly.relayout doesn't touch.
-                        if (chartDiv.parentElement) {{
-                            chartDiv.parentElement.style.height = newHeight + 'px';
-                        }}
-                    }}
-                }}
-                
-                // Call on load and resize, with a timeout fallback in case 'load'
-                // has already fired by the time this script runs (mirrors the
-                // main chart's handleResize, which uses the same fallback)
-                window.addEventListener('load', handleIndividualChartResize);
-                window.addEventListener('resize', handleIndividualChartResize);
-                setTimeout(handleIndividualChartResize, 1000);
-                
-                // Laufzeit dropdown change handler for individual offers
-                const individualLaufzeitFilter = document.getElementById('individual-laufzeit-filter');
-                if (individualLaufzeitFilter) {{
-                    individualLaufzeitFilter.addEventListener('change', function(e) {{
-                        individualCurrentLaufzeit = e.target.value;
-                        applyIndividualFilters();
-                    }});
-                }}
-                
-                // Fixierung dropdown change handler for individual offers
-                const individualFixierungFilter = document.getElementById('individual-fixierung-filter');
-                if (individualFixierungFilter) {{
-                    individualFixierungFilter.addEventListener('change', function(e) {{
-                        individualCurrentFixierung = e.target.value;
-                        applyIndividualFilters();
-                    }});
-                }}
-                
-                // Zinssatz button click handler for individual offers
-                function setIndividualZinssatzFilter(type) {{
-                    individualCurrentZinssatz = type;
-                    
-                    // Update button styling
-                    document.getElementById('individual-btn-beide').classList.remove('active');
-                    document.getElementById('individual-btn-zinssatz').classList.remove('active');
-                    document.getElementById('individual-btn-effektiver').classList.remove('active');
-                    document.getElementById('individual-btn-' + type).classList.add('active');
-                    
-                    applyIndividualFilters();
-                }}
-                
-                // Apply initial filters after chart loads
-                setTimeout(() => {{
-                    applyIndividualFilters();
-                }}, 1500);
-            </script>
-{lowest_offers_table_html}
-        </div>
-''' if individual_chart_html else ''}
+{generate_competitor_trend_charts_html(
+    sollzins_chart_html,
+    sollzins_fixierung_values,
+    sollzins_table_html,
+    effektivzins_chart_html,
+    effektivzins_fixierung_values,
+    effektivzins_table_html,
+    lowest_offers_table_html
+) if (sollzins_chart_html or effektivzins_chart_html) else ''}
 
         <!-- Angebotserfassung Formular -->
         <details class="accordion" style="margin-top: 32px;">
@@ -2636,7 +2722,7 @@ def generate_html():
     # Add SWAP/Euribor section first (Marktzinsen above OeNB), then OeNB
     swap_euribor_section_html = generate_swap_euribor_section_html(
         swap_chart_html, euribor_chart_html, swap_png_base64, euribor_png_base64,
-        for_email=False, swap_maturities=swap_maturities
+        for_email=False, swap_maturities=swap_maturities, swap_table_html=swap_table_html
     )
     html_content += swap_euribor_section_html
 
@@ -2658,16 +2744,16 @@ def generate_html():
         f.write(html_content)
     
     print(f"[OK] HTML page generated: {HTML_PATH}")
-    return True, png_base64, individual_png_base64
+    return True, png_base64, sollzins_png_base64, effektivzins_png_base64
 
 
-def generate_email_html(png_base64, individual_png_base64=None):
+def generate_email_html(png_base64, sollzins_png_base64=None, effektivzins_png_base64=None):
     """
     Generate static HTML for email (no JavaScript, so no filter accordions,
     interactive Plotly charts, or the competitor-offer entry form). Mirrors
     the redesigned web page's structure/section order as closely as an
     email-safe rendering allows: Durchblicker chart + trend table,
-    Konkurrenzangebote chart + lowest-offers-last-30-days table, then
+    Konkurrenzangebote trend charts (Sollzins + Effektivzins) + lowest-offers-last-30-days table, then
     Marktzinsen (SWAP/Euribor) before OeNB, using the same shared
     section-rendering functions as generate_html() so both stay in sync.
     """
@@ -2692,14 +2778,25 @@ def generate_email_html(png_base64, individual_png_base64=None):
     euribor_chart_result = generate_euribor_chart()
 
     if swap_chart_result[0]:
-        swap_chart_html, swap_maturities, swap_png_base64 = swap_chart_result
+        swap_chart_html, swap_maturities, swap_png_base64, swap_table_html = swap_chart_result
     else:
-        swap_chart_html, swap_maturities, swap_png_base64 = None, [], None
+        swap_chart_html, swap_maturities, swap_png_base64, swap_table_html = None, [], None, ''
 
     if euribor_chart_result[0]:
         euribor_chart_html, euribor_png_base64 = euribor_chart_result
     else:
         euribor_chart_html, euribor_png_base64 = None, None
+
+    # Generate tables for last 5 months from competitor data
+    try:
+        from competitor_trend_charts import get_monthly_competitor_stats, generate_last_5_months_table_html
+        sollzins_stats_10y, effektivzins_stats_10y = get_monthly_competitor_stats(DB_PATH, fixierung_filter=10)
+        sollzins_table_html = generate_last_5_months_table_html(sollzins_stats_10y, "Sollzinssatz") if sollzins_stats_10y else ''
+        effektivzins_table_html = generate_last_5_months_table_html(effektivzins_stats_10y, "Effektivzinssatz") if effektivzins_stats_10y else ''
+    except Exception as e:
+        print(f"[WARN] Could not generate 5-month tables for email: {e}")
+        sollzins_table_html = ''
+        effektivzins_table_html = ''
 
     # Lowest Sollzins per bank in the last 30 days, for the table under the
     # Konkurrenzangebote chart (same helper as the web page)
@@ -2789,18 +2886,19 @@ def generate_email_html(png_base64, individual_png_base64=None):
             width: fit-content;
             margin: 25px auto;
             padding: 15px 30px;
-            background-color: var(--color-primary) !important;
+            background-color: #0f3b52 !important;
             color: white !important;
             text-decoration: none !important;
-            border-radius: var(--radius-sm);
+            border-radius: 8px;
             font-size: 1.1em;
             font-weight: bold;
             text-align: center;
-            box-shadow: var(--shadow-sm);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }}
         .interactive-button:visited, .interactive-button:link {{
             color: white !important;
             text-decoration: none !important;
+            background-color: #0f3b52 !important;
         }}
         .container {{
             max-width: 1200px;
@@ -2952,19 +3050,40 @@ def generate_email_html(png_base64, individual_png_base64=None):
             </div>
         </div>
 
+
 {f'''
+        <!-- Sollzinssatz Competitor Trend (Email) -->
         <div class="chart-container" style="margin-top: 40px;">
-            <div class="chart-title">💳 Wohnkredite - Konkurrenzangebote</div>
-            <img src="data:image/png;base64,{individual_png_base64}" alt="Individual Loan Offers Chart">
+            <h2 style="color: #1b2733; font-size: 20px; margin-bottom: 16px;">📊 Sollzinssatz Konkurrenzangebote - Zeitverlauf (10 Jahre)</h2>
+            <div style="text-align: center; margin: 20px 0;">
+                <img src="data:image/png;base64,{sollzins_png_base64}"
+                     alt="Sollzins Trend Chart"
+                     style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+            </div>
+{sollzins_table_html}
+        </div>
+''' if sollzins_png_base64 else ''}
+
+{f'''
+        <!-- Effektivzinssatz Competitor Trend (Email) -->
+        <div class="chart-container" style="margin-top: 40px;">
+            <h2 style="color: #1b2733; font-size: 20px; margin-bottom: 16px;">📈 Effektivzinssatz Konkurrenzangebote - Zeitverlauf (10 Jahre)</h2>
+            <div style="text-align: center; margin: 20px 0;">
+                <img src="data:image/png;base64,{effektivzins_png_base64}"
+                     alt="Effektivzins Trend Chart"
+                     style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+            </div>
+{effektivzins_table_html}
 {lowest_offers_table_html}
         </div>
-''' if individual_png_base64 else ''}
+''' if effektivzins_png_base64 else ''}
 '''
 
     # Add SWAP/Euribor section first (Marktzinsen above OeNB), then OeNB -
     # same order as generate_html()
     swap_euribor_section_html = generate_swap_euribor_section_html(
-        swap_chart_html, euribor_chart_html, swap_png_base64, euribor_png_base64, for_email=True
+        swap_chart_html, euribor_chart_html, swap_png_base64, euribor_png_base64, for_email=True,
+        swap_table_html=swap_table_html
     )
     html_content += swap_euribor_section_html
 
@@ -3008,18 +3127,20 @@ if __name__ == "__main__":
     
     # Generate interactive HTML (for website)
     print("[INFO] Generating interactive HTML for web...")
-    success, png_base64, individual_png_base64 = generate_html()
+    success, png_base64, sollzins_png_base64, effektivzins_png_base64 = generate_html()
     
     if success:
         print("\n[SUCCESS] Interactive HTML report generated successfully!")
         print(f"   [FILE] Web HTML: {HTML_PATH}")
         print(f"   [FILE] Chart PNG: {CHART_PNG_PATH}")
-        if individual_png_base64:
-            print(f"   [FILE] Individual Offers Chart PNG: {INDIVIDUAL_OFFERS_CHART_PNG_PATH}")
+        if sollzins_png_base64:
+            print(f"   [INFO] Sollzins Competitor Trend Chart PNG generated")
+        if effektivzins_png_base64:
+            print(f"   [INFO] Effektivzins Competitor Trend Chart PNG generated")
         
         # Generate email HTML (with static PNGs)
         print("\n[INFO] Generating email-friendly HTML...")
-        email_success = generate_email_html(png_base64, individual_png_base64)
+        email_success = generate_email_html(png_base64, sollzins_png_base64, effektivzins_png_base64)
         
         if email_success:
             print("\n[SUCCESS] Email HTML report generated successfully!")
