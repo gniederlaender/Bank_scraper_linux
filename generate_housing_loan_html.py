@@ -181,7 +181,7 @@ def compute_trend_rows(variations, previous_variations):
 
     Returns:
         List of dicts sorted by fixierung_jahre:
-        {'fixierung_jahre', 'current_str', 'previous_str', 'trend'}
+        {'fixierung_jahre', 'current_str', 'previous_str', 'trend', 'einberechnete_kosten'}
         where trend is one of 'up', 'down', 'flat', 'na'.
     """
     previous_by_fixierung = {}
@@ -207,13 +207,17 @@ def compute_trend_rows(variations, previous_variations):
         else:
             trend = 'down'
 
+        # Get einberechnete_kosten from current variation
+        einberechnete_kosten = v.get('einberechnete_kosten')
+
         rows.append({
             'fixierung_jahre': fixierung,
             'current_str': current_str,
             'previous_str': previous_str,
             'current_short': format_percent_short(current_val),
             'previous_short': format_percent_short(previous_val),
-            'trend': trend
+            'trend': trend,
+            'einberechnete_kosten': einberechnete_kosten
         })
 
     return rows
@@ -1937,6 +1941,7 @@ def generate_html():
                             <td>{row['previous_short']}</td>
                             <td>{row['current_short']}</td>
                             <td>{trend_badge_html(row['trend'])}</td>
+                            <td>{'€{:,.2f}'.format(row['einberechnete_kosten']) if row['einberechnete_kosten'] is not None else '–'}</td>
                         </tr>'''
         for row in initial_trend_rows
     )
@@ -2394,6 +2399,7 @@ def generate_html():
                             <th>Voriger Lauf</th>
                             <th>Aktueller Lauf</th>
                             <th>Trend</th>
+                            <th>Einberechnete Kosten</th>
                         </tr>
                     </thead>
                     <tbody id="trend-tbody">{initial_trend_tbody_html}
@@ -2516,12 +2522,17 @@ def generate_html():
                             else trend = 'down';
                         }}
 
+                        const kostenFormatted = v.einberechnete_kosten != null
+                            ? '€' + v.einberechnete_kosten.toLocaleString('de-DE', {{minimumFractionDigits: 2, maximumFractionDigits: 2}})
+                            : '–';
+
                         trendTable += `
                                 <tr>
                                     <td class="fixierung-cell">${{v.fixierung_jahre}}J</td>
                                     <td>${{formatSollzins(previousVal)}}</td>
                                     <td>${{formatSollzins(currentVal)}}</td>
                                     <td>${{trendBadge(trend)}}</td>
+                                    <td>${{kostenFormatted}}</td>
                                 </tr>`;
                     }});
                     document.querySelector('#trend-tbody').innerHTML = trendTable;
@@ -2735,6 +2746,7 @@ def generate_html():
             Data Source: Housing Loan Database | Latest Run ID: {latest_run['id']}<br>
         </div>
     </div>
+    </div>
 </body>
 </html>
 '''
@@ -2839,6 +2851,7 @@ def generate_email_html(png_base64, sollzins_png_base64=None, effektivzins_png_b
                             <td>{row['previous_short']}</td>
                             <td>{row['current_short']}</td>
                             <td>{trend_badge_html(row['trend'])}</td>
+                            <td>{'€{:,.2f}'.format(row['einberechnete_kosten']) if row['einberechnete_kosten'] is not None else '–'}</td>
                         </tr>'''
         for row in trend_rows
     )
@@ -2876,10 +2889,14 @@ def generate_email_html(png_base64, sollzins_png_base64=None, effektivzins_png_b
         body {{
             font-family: var(--font-sans);
             margin: 0;
-            padding: 20px;
+            padding: 0;
             background: var(--color-bg);
             color: var(--color-text);
-            min-height: 100vh;
+        }}
+        .email-root {{
+            margin: 0;
+            padding: 20px;
+            background: var(--color-bg);
         }}
         .interactive-button {{
             display: block;
@@ -2990,7 +3007,7 @@ def generate_email_html(png_base64, sollzins_png_base64=None, effektivzins_png_b
             border-top: 1px solid var(--color-border);
         }}
         @media (max-width: 768px) {{
-            body {{
+            .email-root {{
                 padding: 5px;
             }}
             .container {{
@@ -3019,17 +3036,18 @@ def generate_email_html(png_base64, sollzins_png_base64=None, effektivzins_png_b
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🏠 Housing Loan Comparison</h1>
-        <div class="subtitle">
-            Sollzins-Entwicklung - 25 Jahre Laufzeit
-        </div>
+    <div class="email-root">
+        <div class="container">
+            <h1>🏠 Housing Loan Comparison</h1>
+            <div class="subtitle">
+                Sollzins-Entwicklung - 25 Jahre Laufzeit
+            </div>
 
-        <a href="https://smartprototypes.net/Bank_market_overview/bank_comparison_housing_loan_durchblicker.html" class="interactive-button" target="_blank">
-            🔗 Zu den interaktiven Charts
-        </a>
+            <a href="https://smartprototypes.net/Bank_market_overview/bank_comparison_housing_loan_durchblicker.html" class="interactive-button" target="_blank">
+                🔗 Zu den interaktiven Charts
+            </a>
 
-        <div class="chart-container">
+            <div class="chart-container">
             <div class="chart-title">📈 Wohnkredite - Durchblicker-Bestpreis</div>
             <img src="data:image/png;base64,{png_base64}" alt="Housing Loan Interest Rate Chart">
 
@@ -3042,6 +3060,7 @@ def generate_email_html(png_base64, sollzins_png_base64=None, effektivzins_png_b
                             <th>Voriger Lauf</th>
                             <th>Aktueller Lauf</th>
                             <th>Trend</th>
+                            <th>Einberechnete Kosten</th>
                         </tr>
                     </thead>
                     <tbody>{trend_tbody_html}
@@ -3095,6 +3114,7 @@ def generate_email_html(png_base64, sollzins_png_base64=None, effektivzins_png_b
             Last Updated: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}<br>
             Data Source: Housing Loan Database | Latest Run ID: {latest_run['id']}<br>
         </div>
+    </div>
     </div>
 </body>
 </html>
