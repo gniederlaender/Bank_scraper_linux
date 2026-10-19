@@ -26,7 +26,7 @@ A comprehensive Python-based web scraper system that collects and compares loan 
 - Comprehensive logging and error handling
 
 ### Browser Automation
-- Uses Playwright for housing loan scraping (Durchblicker.at)
+- Uses Playwright for housing loan scraping (Durchblicker.at): opens the site in headless Chromium and calls the `tariff-calculate/immokredit` API via `fetch()` from inside the page. Plain HTTP clients (requests/curl) are blocked by Cloudflare with HTTP 403, so the browser context is required.
 - Uses Selenium with Firefox for consumer loan scraping
 - Supports headless browser operation
 - Optimized for Linux/ARM64 architecture
@@ -212,7 +212,7 @@ python3 send_email_report.py bank_comparison_consumer_loan_email.html --type kon
 ```
 Bank_scraper_linux/
 ├── Scrapers
-│   ├── test_durchblicker.py                    # Housing loan scraper (Playwright)
+│   ├── test_durchblicker.py                    # Housing loan scraper (Playwright + API)
 │   └── austrian_bankscraper_linux.py           # Consumer loan scraper (Selenium)
 │
 ├── Database Management
