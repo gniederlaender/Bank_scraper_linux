@@ -121,7 +121,7 @@ class SparkasseFetcher:
         self.session = requests.Session()
         self.session.headers.update({
             'accept': '*/*',
-            'accept-encoding': 'gzip, deflate, br, zstd',
+            'accept-encoding': 'gzip, deflate',
             'accept-language': 'de,de-DE;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,hu;q=0.5,de-AT;q=0.4',
             'content-type': 'application/json',
             'origin': 'https://www.sparkasse.at',
