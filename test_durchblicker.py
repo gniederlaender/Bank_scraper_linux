@@ -8,8 +8,14 @@ the form, this scraper calls the calculation API the wizard itself uses:
 
 The endpoint accepts the full wizard input as JSON and synchronously returns
 the best-offer calculation (Rate, Sollzins, Effektivzins, Anschlusskondition,
-Auszahlungsbetrag, eingerechnete Kosten, Gesamtbelastung, Besicherung) —
-no browser, no cookie banner, no captcha required.
+Auszahlungsbetrag, eingerechnete Kosten, Gesamtbelastung, Besicherung).
+
+Transport: durchblicker.at sits behind Cloudflare, which answers plain HTTP
+clients (python-requests, curl) from our Hetzner server with 403 "Sorry, you
+have been blocked". A normal headless Chromium is let through. So the scraper
+opens durchblicker.at once in Playwright and issues the API calls with fetch()
+from inside the page (same origin, exactly like the wizard does). No form
+interaction, no cookie banner handling needed.
 
 The household/project parameters below mirror the values the old UI scraper
 entered, so the stored time series stays comparable:
@@ -26,12 +32,13 @@ create_housing_loan_view.py / generate_housing_loan_html.py keep working.
 from __future__ import annotations
 
 import copy
+import json
 import sys
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import requests
+from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
 from db_helper import save_scraping_data
 
@@ -44,10 +51,13 @@ except ImportError:
 
 API_URL = "https://durchblicker.at/api/0.2/tariff-calculate/immokredit"
 
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-)
+LANDING_URL = "https://durchblicker.at/immobilienfinanzierung"
+BROWSER_ARGS = [
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--disable-setuid-sandbox",
+]
 
 LAUFZEITEN_TO_SCRAPE = [35, 30, 25, 20, 15]
 
@@ -196,8 +206,61 @@ def de_number(value: float, decimals: int = 3) -> str:
     return f"{value:.{decimals}f}".replace(".", ",")
 
 
+class BlockedError(RuntimeError):
+    """durchblicker.at / Cloudflare refuses our browser session - stop the run."""
+
+
+class BrowserApi:
+    """Calls the tariff-calculate API via fetch() inside a durchblicker.at page."""
+
+    JS_FETCH = """async ([url, payload, timeoutMs]) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), timeoutMs);
+        try {
+            const r = await fetch(url, {
+                method: 'POST',
+                headers: {'content-type': 'application/json'},
+                body: JSON.stringify(payload),
+                signal: ctrl.signal,
+            });
+            return {status: r.status, text: await r.text()};
+        } catch (e) {
+            return {status: 0, text: String(e)};
+        } finally {
+            clearTimeout(t);
+        }
+    }"""
+
+    def __init__(self, playwright) -> None:
+        self.browser = playwright.chromium.launch(headless=True, args=BROWSER_ARGS)
+        self.context = self.browser.new_context(locale="de-AT")
+        self.page = self.context.new_page()
+        self.open_landing()
+
+    def open_landing(self) -> None:
+        response = self.page.goto(LANDING_URL, wait_until="domcontentloaded", timeout=60000)
+        status = response.status if response else None
+        print(f"[INFO] Opened {LANDING_URL} (HTTP {status})", flush=True)
+        if status != 200:
+            raise BlockedError(
+                f"durchblicker.at landing page returned HTTP {status} - "
+                "browser access blocked?"
+            )
+
+    def post(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self.page.evaluate(
+            self.JS_FETCH, [API_URL, payload, REQUEST_TIMEOUT * 1000]
+        )
+
+    def close(self) -> None:
+        try:
+            self.browser.close()
+        except PlaywrightError:
+            pass
+
+
 def fetch_offer(
-    session: requests.Session, laufzeit_jahre: int, fixierung_jahre: int
+    api: BrowserApi, laufzeit_jahre: int, fixierung_jahre: int
 ) -> Optional[Dict[str, Any]]:
     """Call the tariff-calculate API for one Laufzeit/Fixierung combination."""
     payload = build_input(laufzeit_jahre, fixierung_jahre)
@@ -206,20 +269,29 @@ def fetch_offer(
     for attempt in range(MAX_RETRIES):
         rate_limited = False
         try:
-            response = session.post(API_URL, json=payload, timeout=REQUEST_TIMEOUT)
-            if response.status_code == 429:
+            response = api.post(payload)
+            status = response.get("status")
+            if status == 429:
                 rate_limited = True
                 last_error = "HTTP 429 (rate limited)"
-            elif response.status_code != 200:
-                last_error = f"HTTP {response.status_code}"
+            elif status != 200:
+                last_error = f"HTTP {status}: {response.get('text', '')[:120]}"
+                if status == 403:
+                    if attempt > 0:
+                        raise BlockedError(f"API still HTTP 403 after page reload")
+                    # Session may have been flagged; reload the landing page once
+                    # (raises BlockedError if the page itself is now blocked).
+                    api.open_landing()
             else:
-                body = response.json()
+                body = json.loads(response["text"])
                 if body.get("success") and body.get("result"):
                     return body["result"][0]
                 last_error = (
                     f"success={body.get('success')} message={body.get('message')}"
                 )
-        except (requests.RequestException, ValueError) as exc:
+        except BlockedError:
+            raise
+        except (PlaywrightError, ValueError, KeyError) as exc:
             last_error = str(exc)
 
         if attempt < MAX_RETRIES - 1:
@@ -309,16 +381,22 @@ def offer_to_variation(
 
 
 def main() -> int:
-    session = requests.Session()
-    session.headers.update(
-        {
-            "User-Agent": USER_AGENT,
-            "Content-Type": "application/json",
-            "Origin": "https://durchblicker.at",
-            "Referer": "https://durchblicker.at/immokredit/vergleich/ergebnis",
-        }
-    )
+    with sync_playwright() as playwright:
+        try:
+            api = BrowserApi(playwright)
+        except (PlaywrightError, RuntimeError) as exc:
+            print(f"[ERROR] Could not open durchblicker.at in browser: {exc}", flush=True)
+            return 1
+        try:
+            return scrape(api)
+        except BlockedError as exc:
+            print(f"[ERROR] Blocked by durchblicker.at, aborting run: {exc}", flush=True)
+            return 1
+        finally:
+            api.close()
 
+
+def scrape(api: BrowserApi) -> int:
     base_metadata = {
         "kreditbetrag": 500000.00,
         "kaufpreis": 500000.00,
@@ -331,7 +409,7 @@ def main() -> int:
     }
 
     print("\n" + "=" * 80)
-    print("[INFO] Durchblicker Immokredit Scraper (tariff-calculate API)")
+    print("[INFO] Durchblicker Immokredit Scraper (tariff-calculate API via browser)")
     print(f"[INFO] Laufzeiten: {LAUFZEITEN_TO_SCRAPE}")
     print("=" * 80 + "\n")
 
@@ -346,7 +424,7 @@ def main() -> int:
 
         variations_data = []
         for fixierung in fixierung_values:
-            offer = fetch_offer(session, laufzeit, fixierung)
+            offer = fetch_offer(api, laufzeit, fixierung)
             variation = offer_to_variation(offer, laufzeit, fixierung)
             variations_data.append(variation)
 
@@ -365,10 +443,16 @@ def main() -> int:
 
             time.sleep(DELAY_BETWEEN_CALLS)
 
+        if not any(v["rate"] is not None for v in variations_data):
+            # Don't store an all-empty run (e.g. when blocked) - it would show
+            # up as a gap of "-" rows in the trend tables.
+            print(f"[ERROR] Laufzeit {laufzeit}: no valid offers, not saving", flush=True)
+            continue
+
         run_metadata = dict(base_metadata)
         run_metadata["scrape_date"] = datetime.now()
         run_metadata["laufzeit_jahre"] = laufzeit
-        run_metadata["notes"] = f"API scraper (tariff-calculate) - {laufzeit} Jahre"
+        run_metadata["notes"] = f"API scraper (tariff-calculate, browser) - {laufzeit} Jahre"
 
         try:
             run_id = save_scraping_data(
