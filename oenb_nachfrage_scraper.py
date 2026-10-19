@@ -148,7 +148,7 @@ class OeNBNachfrageScraper:
         self.timeout = timeout
         self.driver = None
         self.wait = None
-        self.base_url = "https://oenb.shinyapps.io/wohnimmobilien_dashboard/"
+        self.base_url = "https://connect.oenb.at/oenb_apps/wohnimmobilien_dashboard/"
         self.screenshots_dir = Path("screenshots")
         self.screenshots_dir.mkdir(exist_ok=True)
     
